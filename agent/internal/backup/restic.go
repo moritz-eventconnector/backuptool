@@ -208,6 +208,54 @@ func (r *Runner) Restore(ctx context.Context, dest *Destination, resticSnapshotI
 	return nil
 }
 
+// ListFiles lists files in a specific snapshot at a given path.
+func (r *Runner) ListFiles(ctx context.Context, dest *Destination, resticSnapshotID, path, password string) ([]map[string]interface{}, error) {
+	repoURL, env, err := r.buildRepoURLAndEnv(dest)
+	if err != nil {
+		return nil, err
+	}
+	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
+
+	if path == "" {
+		path = "/"
+	}
+	cmd := exec.CommandContext(ctx, r.ResticBin, "ls", "--json", resticSnapshotID, path)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("restic ls: %w", err)
+	}
+
+	var files []map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &entry); err == nil {
+			files = append(files, entry)
+		}
+	}
+	return files, nil
+}
+
+// ForgetSnapshot removes a single snapshot from the repository.
+func (r *Runner) ForgetSnapshot(ctx context.Context, dest *Destination, resticSnapshotID, password string) error {
+	repoURL, env, err := r.buildRepoURLAndEnv(dest)
+	if err != nil {
+		return err
+	}
+	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
+
+	cmd := exec.CommandContext(ctx, r.ResticBin, "forget", "--prune", resticSnapshotID)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("restic forget: %v\n%s", err, string(out))
+	}
+	return nil
+}
+
 // ListSnapshots lists all snapshots in a repo.
 func (r *Runner) ListSnapshots(ctx context.Context, dest *Destination, password string) ([]map[string]interface{}, error) {
 	repoURL, env, err := r.buildRepoURLAndEnv(dest)

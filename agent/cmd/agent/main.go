@@ -222,6 +222,34 @@ func handleConnection(
 				}
 			}()
 
+		case "list_files":
+			var resticSnapshotID, path string
+			json.Unmarshal(msg["resticSnapshotId"], &resticSnapshotID)
+			json.Unmarshal(msg["path"], &path)
+			go func() {
+				files, err := handleListFiles(ctx, srv, runner, resticSnapshotID, path)
+				reply := map[string]interface{}{
+					"type":             "list_files_result",
+					"resticSnapshotId": resticSnapshotID,
+				}
+				if err != nil {
+					reply["error"] = err.Error()
+				} else {
+					reply["files"] = files
+				}
+				conn.WriteJSON(reply)
+			}()
+
+		case "forget_snapshot":
+			var resticSnapshotID, destinationID string
+			json.Unmarshal(msg["resticSnapshotId"], &resticSnapshotID)
+			json.Unmarshal(msg["destinationId"], &destinationID)
+			go func() {
+				if err := handleForgetSnapshot(ctx, srv, runner, resticSnapshotID, destinationID); err != nil {
+					log.Printf("Forget snapshot failed: %v", err)
+				}
+			}()
+
 		case "pong":
 			// heartbeat response — ignore
 
@@ -346,6 +374,43 @@ func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup
 		}
 	}
 	return fmt.Errorf("destination %s not found in any job", destinationID)
+}
+
+func handleListFiles(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, path string) ([]map[string]interface{}, error) {
+	jobs, err := srv.GetJobConfigs()
+	if err != nil {
+		return nil, fmt.Errorf("fetch job configs: %w", err)
+	}
+	// Use the first available destination that has this snapshot
+	for _, job := range jobs {
+		for _, d := range job.Destinations {
+			dest := &backup.Destination{ID: d.ID, Name: d.Name, Type: d.Type, Config: d.Config}
+			files, err := runner.ListFiles(ctx, dest, resticSnapshotID, path, job.ResticPassword)
+			if err == nil {
+				return files, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("snapshot %s not found in any destination", resticSnapshotID)
+}
+
+func handleForgetSnapshot(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, destinationID string) error {
+	jobs, err := srv.GetJobConfigs()
+	if err != nil {
+		return fmt.Errorf("fetch job configs: %w", err)
+	}
+	for _, job := range jobs {
+		for _, d := range job.Destinations {
+			if destinationID != "" && d.ID != destinationID {
+				continue
+			}
+			dest := &backup.Destination{ID: d.ID, Name: d.Name, Type: d.Type, Config: d.Config}
+			if err := runner.ForgetSnapshot(ctx, dest, resticSnapshotID, job.ResticPassword); err == nil {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("could not forget snapshot %s", resticSnapshotID)
 }
 
 func sendSnapshotDone(conn *websocket.Conn, snapshotID, status string, result *backup.Result, errMsg string) {

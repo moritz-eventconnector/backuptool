@@ -93,6 +93,23 @@ export const api = {
   uploadLicense: (rawJwt: string) =>
     request("/license", { method: "POST", body: JSON.stringify({ license: rawJwt }) }),
   deleteLicense: () => request("/license", { method: "DELETE" }),
+
+  // Settings — Notifications
+  getNotificationSettings: () => request<NotificationSettings>("/settings/notifications"),
+  saveNotificationSettings: (data: Partial<NotificationSettings>) =>
+    request("/settings/notifications", { method: "PUT", body: JSON.stringify(data) }),
+
+  // Settings — Users
+  listUsers: () => request<User[]>("/settings/users"),
+  createUser: (data: { email: string; name: string; password: string; role: string }) =>
+    request<User>("/settings/users", { method: "POST", body: JSON.stringify(data) }),
+  updateUser: (id: string, data: { name?: string; role?: string; password?: string }) =>
+    request(`/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteUser: (id: string) => request(`/settings/users/${id}`, { method: "DELETE" }),
+
+  // Snapshot restore
+  restoreSnapshot: (id: string, restorePath: string) =>
+    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath }) }),
 };
 
 // Types
@@ -170,6 +187,19 @@ export interface Destination {
   name: string;
   type: string;
   createdAt: string;
+}
+
+export interface NotificationSettings {
+  emailEnabled: boolean;
+  emailRecipients: string[];
+  notifyOnStart: boolean;
+  notifyOnSuccess: boolean;
+  notifyOnFailure: boolean;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpFrom?: string;
 }
 
 export interface LicenseInfo {

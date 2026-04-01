@@ -1,0 +1,222 @@
+import { Router } from "express";
+import { z } from "zod";
+import { nanoid } from "nanoid";
+import { getDb } from "../db/index.js";
+import { users, notificationSettings, auditLog } from "../db/schema/index.js";
+import { eq } from "drizzle-orm";
+import { requireAuth, requireRole } from "../auth/middleware.js";
+import { hashPassword } from "../auth/password.js";
+import { logger } from "../logger.js";
+
+export const settingsRouter = Router();
+
+// ── Notification Settings ─────────────────────────────────────────────────────
+
+// GET /api/settings/notifications
+settingsRouter.get("/notifications", requireAuth, (_req, res) => {
+  const db = getDb();
+  const [row] = db.select().from(notificationSettings).all();
+  if (!row) {
+    res.json({
+      id: "singleton",
+      emailEnabled: false,
+      emailRecipients: [],
+      notifyOnStart: false,
+      notifyOnSuccess: true,
+      notifyOnFailure: true,
+    });
+    return;
+  }
+  res.json({
+    ...row,
+    emailRecipients: JSON.parse(row.emailRecipients ?? "[]"),
+  });
+});
+
+const notifSchema = z.object({
+  emailEnabled: z.boolean(),
+  emailRecipients: z.array(z.string().email()).default([]),
+  notifyOnStart: z.boolean().default(false),
+  notifyOnSuccess: z.boolean().default(true),
+  notifyOnFailure: z.boolean().default(true),
+  smtpHost: z.string().optional(),
+  smtpPort: z.number().int().min(1).max(65535).optional(),
+  smtpUser: z.string().optional(),
+  smtpPass: z.string().optional(),
+  smtpFrom: z.string().optional(),
+});
+
+// PUT /api/settings/notifications
+settingsRouter.put("/notifications", requireAuth, requireRole("admin"), (req, res) => {
+  const parse = notifSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: "Invalid input", details: parse.error.flatten() });
+    return;
+  }
+
+  const db = getDb();
+  const data = parse.data;
+
+  db.insert(notificationSettings).values({
+    id: "singleton",
+    emailEnabled: data.emailEnabled,
+    emailRecipients: JSON.stringify(data.emailRecipients),
+    notifyOnStart: data.notifyOnStart,
+    notifyOnSuccess: data.notifyOnSuccess,
+    notifyOnFailure: data.notifyOnFailure,
+    updatedAt: new Date().toISOString(),
+  }).onConflictDoUpdate({
+    target: notificationSettings.id,
+    set: {
+      emailEnabled: data.emailEnabled,
+      emailRecipients: JSON.stringify(data.emailRecipients),
+      notifyOnStart: data.notifyOnStart,
+      notifyOnSuccess: data.notifyOnSuccess,
+      notifyOnFailure: data.notifyOnFailure,
+      updatedAt: new Date().toISOString(),
+    },
+  }).run();
+
+  logger.info({ adminId: "system" }, "Notification settings updated");
+  res.json({ message: "Notification settings saved" });
+});
+
+// ── User Management ───────────────────────────────────────────────────────────
+
+// GET /api/settings/users
+settingsRouter.get("/users", requireAuth, requireRole("admin"), (_req, res) => {
+  const db = getDb();
+  const all = db.select({
+    id: users.id,
+    email: users.email,
+    name: users.name,
+    role: users.role,
+    ssoProvider: users.ssoProvider,
+    totpEnabled: users.totpEnabled,
+    createdAt: users.createdAt,
+    updatedAt: users.updatedAt,
+  }).from(users).all();
+  res.json(all);
+});
+
+const createUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(100),
+  password: z.string().min(12, "Password must be at least 12 characters"),
+  role: z.enum(["admin", "operator", "viewer"]).default("viewer"),
+});
+
+// POST /api/settings/users
+settingsRouter.post("/users", requireAuth, requireRole("admin"), async (req, res) => {
+  const parse = createUserSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: "Invalid input", details: parse.error.flatten() });
+    return;
+  }
+
+  const db = getDb();
+  const [existing] = db.select({ id: users.id }).from(users).where(eq(users.email, parse.data.email)).all();
+  if (existing) {
+    res.status(409).json({ error: "A user with this email already exists" });
+    return;
+  }
+
+  const passwordHash = await hashPassword(parse.data.password);
+  const id = nanoid();
+
+  db.insert(users).values({
+    id,
+    email: parse.data.email,
+    name: parse.data.name,
+    passwordHash,
+    role: parse.data.role,
+  }).run();
+
+  db.insert(auditLog).values({
+    id: nanoid(),
+    userId: req.user!.id,
+    action: "create_user",
+    resource: `user:${id}`,
+    details: JSON.stringify({ email: parse.data.email, role: parse.data.role }),
+    ip: req.ip,
+  }).run();
+
+  logger.info({ adminId: req.user!.id, newUserId: id, email: parse.data.email }, "User created");
+  res.status(201).json({ id, email: parse.data.email, name: parse.data.name, role: parse.data.role });
+});
+
+const updateUserSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  role: z.enum(["admin", "operator", "viewer"]).optional(),
+  password: z.string().min(12).optional(),
+});
+
+// PATCH /api/settings/users/:id
+settingsRouter.patch("/users/:id", requireAuth, requireRole("admin"), async (req, res) => {
+  const parse = updateUserSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: "Invalid input", details: parse.error.flatten() });
+    return;
+  }
+
+  const db = getDb();
+  const [user] = db.select().from(users).where(eq(users.id, req.params.id)).all();
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if (parse.data.name) updates.name = parse.data.name;
+  if (parse.data.role) updates.role = parse.data.role;
+  if (parse.data.password) updates.passwordHash = await hashPassword(parse.data.password);
+
+  db.update(users)
+    .set(updates as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(users.id, req.params.id))
+    .run();
+
+  logger.info({ adminId: req.user!.id, userId: req.params.id }, "User updated");
+  res.json({ message: "User updated" });
+});
+
+// DELETE /api/settings/users/:id
+settingsRouter.delete("/users/:id", requireAuth, requireRole("admin"), (req, res) => {
+  const db = getDb();
+
+  // Prevent deleting yourself
+  if (req.params.id === req.user!.id) {
+    res.status(400).json({ error: "Cannot delete your own account" });
+    return;
+  }
+
+  const [user] = db.select().from(users).where(eq(users.id, req.params.id)).all();
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  db.delete(users).where(eq(users.id, req.params.id)).run();
+
+  db.insert(auditLog).values({
+    id: nanoid(),
+    userId: req.user!.id,
+    action: "delete_user",
+    resource: `user:${req.params.id}`,
+    ip: req.ip,
+  }).run();
+
+  logger.info({ adminId: req.user!.id, userId: req.params.id }, "User deleted");
+  res.json({ message: "User deleted" });
+});
+
+// GET /api/settings/audit-log
+settingsRouter.get("/audit-log", requireAuth, requireRole("admin"), (req, res) => {
+  const db = getDb();
+  const limit = Math.min(parseInt(req.query.limit as string ?? "100", 10), 500);
+  const logs = db.select().from(auditLog)
+    .orderBy(auditLog.createdAt)
+    .limit(limit)
+    .all();
+  res.json(logs);
+});

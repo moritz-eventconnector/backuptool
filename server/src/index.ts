@@ -22,6 +22,7 @@ import { snapshotsRouter } from "./api/snapshots.js";
 import { destinationsRouter } from "./api/destinations.js";
 import { licenseRouter } from "./api/license.js";
 import { internalRouter } from "./api/internal.js";
+import { settingsRouter } from "./api/settings.js";
 
 async function main() {
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ async function main() {
   app.use("/api/destinations", destinationsRouter);
   app.use("/api/license", licenseRouter);
   app.use("/api/internal", internalRouter);
+  app.use("/api/settings", settingsRouter);
 
   // Health check
   app.get("/health", (_req, res) => {
