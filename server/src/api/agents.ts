@@ -143,6 +143,18 @@ agentsRouter.patch("/:id", requireAuth, requireRole("admin", "operator"), (req, 
   res.json({ message: "Agent updated" });
 });
 
+// GET /api/agents/:id/discovered — get discovered services for an agent
+agentsRouter.get("/:id/discovered", requireAuth, (req, res) => {
+  const db = getDb();
+  const [agent] = db.select({ discoveredServices: agents.discoveredServices }).from(agents).where(eq(agents.id, req.params.id)).all();
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  const services = agent.discoveredServices ? JSON.parse(agent.discoveredServices) : [];
+  res.json(services);
+});
+
 // GET /api/agents/:id/jobs — get all backup jobs for an agent
 agentsRouter.get("/:id/jobs", requireAuth, (req, res) => {
   const db = getDb();

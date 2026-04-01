@@ -101,6 +101,16 @@ export function initWebSocket(server: Server): WebSocketServer {
       if (!isUi) {
         const agentId = socketToAgent.get(ws)!;
 
+        if (msg.type === "discovered_services") {
+          const db = getDb();
+          db.update(agents)
+            .set({ discoveredServices: JSON.stringify(msg.services ?? []) })
+            .where(eq(agents.id, agentId))
+            .run();
+          logger.info({ agentId }, "Stored discovered services");
+          return;
+        }
+
         if (msg.type === "heartbeat") {
           const db = getDb();
           db.update(agents)

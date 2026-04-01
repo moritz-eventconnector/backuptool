@@ -96,4 +96,11 @@ export const config = {
   // Restic binary path (agents use their own path; server may need for repo init check)
   resticBin: optional("RESTIC_BIN", "restic"),
   rcloneBin: optional("RCLONE_BIN", "rclone"),
+
+  // Agent binary distribution
+  // Set to a base URL where pre-built agent binaries are hosted, e.g.:
+  //   https://github.com/yourorg/backuptool/releases/download/v1.0.0
+  // Binaries are expected at: $RELEASES_BASE_URL/agent-$os-$arch (+ .exe for windows)
+  // Alternatively, place binaries in $DATA_DIR/binaries/ to serve them directly.
+  releasesBaseUrl: optional("RELEASES_BASE_URL", ""),
 };

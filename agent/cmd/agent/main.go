@@ -21,6 +21,7 @@ import (
 	"github.com/backuptool/agent/internal/backup"
 	"github.com/backuptool/agent/internal/client"
 	"github.com/backuptool/agent/internal/config"
+	"github.com/backuptool/agent/internal/discovery"
 )
 
 const version = "1.0.0"
@@ -130,6 +131,18 @@ func main() {
 		}
 
 		log.Println("Connected to server via WebSocket")
+
+		// Run service discovery in background and report to server
+		go func() {
+			services := discovery.Scan()
+			if err := conn.WriteJSON(map[string]interface{}{
+				"type":     "discovered_services",
+				"services": services,
+			}); err != nil {
+				log.Printf("Failed to send discovered_services: %v", err)
+			}
+		}()
+
 		handleConnection(ctx, conn, srv, scheduler, runner)
 	}
 }

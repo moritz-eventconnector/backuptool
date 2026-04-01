@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Job } from "../api/client.ts";
-import { Plus, Trash2, Play, Pencil, Briefcase, Lock } from "lucide-react";
+import { api, type Job, type DiscoveredService } from "../api/client.ts";
+import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles } from "lucide-react";
 
 export default function Jobs() {
   const qc = useQueryClient();
@@ -109,6 +109,11 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
 }) {
   const [name, setName] = useState(job?.name ?? "");
   const [agentId, setAgentId] = useState(job?.agentId ?? agents[0]?.id ?? "");
+  const { data: discoveredServices = [] } = useQuery({
+    queryKey: ["discovered", agentId],
+    queryFn: () => api.getDiscoveredServices(agentId),
+    enabled: !!agentId && !job,
+  });
   const [sourcePaths, setSourcePaths] = useState(job?.sourcePaths.join("\n") ?? "");
   const [destIds, setDestIds] = useState<string[]>(job?.destinationIds ?? []);
   const [schedule, setSchedule] = useState(job?.schedule ?? "");
@@ -124,6 +129,13 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
   const [wormDays, setWormDays] = useState(job?.wormRetentionDays?.toString() ?? "30");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const applyDiscovered = (svc: DiscoveredService) => {
+    if (!name) setName(svc.name);
+    setSourcePaths(svc.sourcePaths.join("\n"));
+    if (svc.preScript) setPreScript(svc.preScript);
+    if (svc.postScript) setPostScript(svc.postScript);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,6 +196,32 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
               <label>Schedule (cron)</label>
               <input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 2 * * * (daily at 2am)" />
             </div>
+            {!job && discoveredServices.length > 0 && (
+              <div style={{ gridColumn: "1/-1", marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 13 }}>
+                  <Sparkles size={13} color="var(--primary)" />
+                  <span style={{ color: "var(--primary)", fontWeight: 500 }}>Auto-discovered services</span>
+                  <span style={{ color: "var(--text-muted)" }}>— click to pre-fill</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {discoveredServices.map((svc) => (
+                    <button
+                      key={svc.name}
+                      type="button"
+                      className="btn-ghost"
+                      style={{ fontSize: 12, padding: "4px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius)", display: "flex", alignItems: "center", gap: 5 }}
+                      title={svc.note || svc.type}
+                      onClick={() => applyDiscovered(svc)}
+                    >
+                      <span className={`badge ${svc.priority === "critical" ? "badge-danger" : svc.priority === "recommended" ? "badge-primary" : "badge-muted"}`} style={{ fontSize: 10, padding: "1px 5px" }}>
+                        {svc.priority}
+                      </span>
+                      {svc.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="form-group" style={{ gridColumn: "1/-1" }}>
               <label>Source Paths (one per line)</label>
               <textarea value={sourcePaths} onChange={(e) => setSourcePaths(e.target.value)} rows={3} placeholder="/home/user/data&#10;/var/lib/database" required />

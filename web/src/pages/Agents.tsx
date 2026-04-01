@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, Server, Copy, CheckCircle, XCircle } from "lucide-react";
+import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal } from "lucide-react";
+
+type OsTab = "linux" | "windows" | "manual";
 
 export default function Agents() {
   const qc = useQueryClient();
@@ -10,13 +12,11 @@ export default function Agents() {
   const [newName, setNewName] = useState("");
   const [addResult, setAddResult] = useState<{ agentId: string; registrationToken: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [osTab, setOsTab] = useState<OsTab>("linux");
 
   const addMut = useMutation({
     mutationFn: () => api.generateAgentToken(newName || "New Agent"),
-    onSuccess: (data) => {
-      setAddResult(data);
-      qc.invalidateQueries({ queryKey: ["agents"] });
-    },
+    onSuccess: (data) => { setAddResult(data); qc.invalidateQueries({ queryKey: ["agents"] }); },
   });
 
   const deleteMut = useMutation({
@@ -24,10 +24,18 @@ export default function Agents() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
   });
 
-  const copyToken = () => {
+  const serverOrigin = window.location.origin;
+
+  const installCmd = (tab: OsTab, agentId: string, token: string): string => {
+    const base = `${serverOrigin}/api/agents/install/${agentId}/${token}`;
+    if (tab === "linux") return `curl -sSL ${base}/install.sh | sudo bash`;
+    if (tab === "windows") return `irm ${base}/install.ps1 | iex`;
+    return `backuptool-agent --server ${serverOrigin} --agent-id ${agentId} --token ${token} --name "$(hostname)"`;
+  };
+
+  const copyCmd = () => {
     if (!addResult) return;
-    const cmd = `backuptool-agent --server http://YOUR_SERVER:3000 --agent-id ${addResult.agentId} --token ${addResult.registrationToken}`;
-    navigator.clipboard.writeText(cmd);
+    navigator.clipboard.writeText(installCmd(osTab, addResult.agentId, addResult.registrationToken));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -36,9 +44,8 @@ export default function Agents() {
     <div>
       <div className="page-header">
         <h1>Agents</h1>
-        <button className="btn-primary" onClick={() => { setShowAdd(true); setAddResult(null); setNewName(""); }}>
-          <Plus size={15} style={{ marginRight: 6 }} />
-          Add Agent
+        <button className="btn-primary" onClick={() => { setShowAdd(true); setAddResult(null); setNewName(""); setCopied(false); }}>
+          <Plus size={15} style={{ marginRight: 6 }} />Add Agent
         </button>
       </div>
 
@@ -49,22 +56,14 @@ export default function Agents() {
           <div className="empty-state">
             <Server size={40} />
             <p style={{ marginTop: 8 }}>No agents registered yet</p>
-            <p style={{ fontSize: 12, marginTop: 4 }}>Click "Add Agent" to generate a registration token</p>
+            <p style={{ fontSize: 12, marginTop: 4 }}>Click "Add Agent" to generate a one-line install command</p>
           </div>
         </div>
       ) : (
         <div className="card">
           <table>
             <thead>
-              <tr>
-                <th>Name</th>
-                <th>Hostname</th>
-                <th>Platform</th>
-                <th>Status</th>
-                <th>Last Seen</th>
-                <th>Version</th>
-                <th></th>
-              </tr>
+              <tr><th>Name</th><th>Hostname</th><th>Platform</th><th>Status</th><th>Last Seen</th><th>Version</th><th></th></tr>
             </thead>
             <tbody>
               {agents.map((a) => (
@@ -78,9 +77,7 @@ export default function Agents() {
                       {a.status}
                     </span>
                   </td>
-                  <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                    {a.lastSeen ? new Date(a.lastSeen).toLocaleString() : "Never"}
-                  </td>
+                  <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.lastSeen ? new Date(a.lastSeen).toLocaleString() : "Never"}</td>
                   <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.version}</td>
                   <td>
                     <button className="btn-ghost" style={{ padding: "4px 8px" }}
@@ -98,7 +95,7 @@ export default function Agents() {
       {/* Add Agent Modal */}
       {showAdd && (
         <div className="modal-overlay" onClick={() => setShowAdd(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: 580 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Add Agent</h2>
               <button className="btn-ghost" style={{ padding: "4px 8px" }} onClick={() => setShowAdd(false)}>✕</button>
@@ -108,26 +105,64 @@ export default function Agents() {
               <>
                 <div className="form-group">
                   <label>Agent Name</label>
-                  <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="My Server" autoFocus />
+                  <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="web-server-01" autoFocus />
+                  <small style={{ color: "var(--text-muted)", fontSize: 12 }}>A descriptive name for this machine (e.g. "Passbolt Production")</small>
                 </div>
                 <div className="modal-footer">
                   <button className="btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button>
                   <button className="btn-primary" onClick={() => addMut.mutate()} disabled={addMut.isPending}>
-                    {addMut.isPending ? "Generating..." : "Generate Token"}
+                    {addMut.isPending ? "Generating…" : "Generate Install Command"}
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <div className="alert alert-success">Token generated! Run this command on your target machine:</div>
-                <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 12, fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", marginBottom: 16 }}>
-                  <code>backuptool-agent --server http://YOUR_SERVER:3000 --agent-id {addResult.agentId} --token {addResult.registrationToken}</code>
+                <div className="alert alert-success" style={{ marginBottom: 16 }}>
+                  Token generated. Run the command below on your target machine — it will automatically download, install and register the agent.
                 </div>
-                <button className="btn-ghost" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} onClick={copyToken}>
+
+                {/* OS Tabs */}
+                <div style={{ display: "flex", gap: 2, marginBottom: 0, borderBottom: "1px solid var(--border)" }}>
+                  {([["linux", "Linux / macOS"], ["windows", "Windows"], ["manual", "Manual"]] as [OsTab, string][]).map(([tab, label]) => (
+                    <button key={tab} onClick={() => { setOsTab(tab); setCopied(false); }}
+                      className="btn-ghost"
+                      style={{ borderRadius: "var(--radius) var(--radius) 0 0", paddingBottom: 8, borderBottom: osTab === tab ? "2px solid var(--primary)" : "2px solid transparent", color: osTab === tab ? "var(--primary)" : "var(--text-muted)", fontSize: 13 }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Command box */}
+                <div style={{ background: "#0a0c12", borderRadius: "0 0 var(--radius) var(--radius)", padding: "14px 16px", fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", marginBottom: 12, border: "1px solid var(--border)", borderTop: "none", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <Terminal size={14} color="var(--primary)" style={{ flexShrink: 0, marginTop: 1 }} />
+                  <code style={{ color: "#e2e8f0", flex: 1 }}>
+                    {installCmd(osTab, addResult.agentId, addResult.registrationToken)}
+                  </code>
+                </div>
+
+                {osTab === "linux" && (
+                  <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
+                    Detects Linux or macOS automatically. Installs to <code>/usr/local/bin/</code>, creates a systemd service (Linux) or launchd daemon (macOS). Requires <code>sudo</code>.
+                  </div>
+                )}
+                {osTab === "windows" && (
+                  <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
+                    Run in an <strong>elevated PowerShell</strong> (Run as Administrator). Installs to <code>Program Files\BackupTool\</code> and creates a Windows Service.
+                  </div>
+                )}
+                {osTab === "manual" && (
+                  <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
+                    Download the correct binary from <code>{window.location.origin}/api/agents/binary/linux/amd64</code> (adjust OS/arch), make it executable and run this command. See README for systemd setup.
+                  </div>
+                )}
+
+                <button className="btn-ghost" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} onClick={copyCmd}>
                   {copied ? <CheckCircle size={14} color="var(--success)" /> : <Copy size={14} />}
                   {copied ? "Copied!" : "Copy Command"}
                 </button>
-                <div className="modal-footer">
+
+                <div className="modal-footer" style={{ marginTop: 12 }}>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", flex: 1 }}>The token is single-use and will be invalidated after the agent registers.</p>
                   <button className="btn-primary" onClick={() => setShowAdd(false)}>Done</button>
                 </div>
               </>

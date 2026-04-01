@@ -31,6 +31,7 @@ export const agents = sqliteTable("agents", {
   apiToken: text("api_token"),         // persistent auth token for WS + internal API (SHA-256 hashed)
   certFingerprint: text("cert_fingerprint"), // mTLS client cert SHA-256 fingerprint
   tags: text("tags").default("[]"),    // JSON array of tag strings
+  discoveredServices: text("discovered_services"), // JSON array of DiscoveredService objects
   createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 

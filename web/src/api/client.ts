@@ -65,6 +65,7 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: "DELETE" }),
+  getDiscoveredServices: (id: string) => request<DiscoveredService[]>(`/agents/${id}/discovered`),
 
   // Jobs
   listJobs: () => request<Job[]>("/jobs"),
@@ -208,6 +209,16 @@ export interface NotificationSettings {
   webhookOnStart: boolean;
   webhookOnSuccess: boolean;
   webhookOnFailure: boolean;
+}
+
+export interface DiscoveredService {
+  name: string;
+  type: string;
+  sourcePaths: string[];
+  preScript: string;
+  postScript: string;
+  note: string;
+  priority: "critical" | "recommended" | "optional";
 }
 
 export interface LicenseInfo {

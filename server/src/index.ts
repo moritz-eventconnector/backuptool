@@ -23,6 +23,7 @@ import { destinationsRouter } from "./api/destinations.js";
 import { licenseRouter } from "./api/license.js";
 import { internalRouter } from "./api/internal.js";
 import { settingsRouter } from "./api/settings.js";
+import { installRouter } from "./api/install.js";
 
 async function main() {
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ async function main() {
   app.use("/api/auth", authRouter);
   app.use("/api/auth/sso", ssoRouter);
   app.use("/api/agents", agentsRouter);
+  app.use("/api/agents", installRouter);
   app.use("/api/jobs", jobsRouter);
   app.use("/api/snapshots", snapshotsRouter);
   app.use("/api/destinations", destinationsRouter);

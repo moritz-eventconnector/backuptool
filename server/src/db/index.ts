@@ -63,6 +63,7 @@ export async function initDb(): Promise<void> {
       api_token TEXT,
       cert_fingerprint TEXT,
       tags TEXT DEFAULT '[]',
+      discovered_services TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
 
@@ -194,6 +195,9 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
   `);
+
+  // Add discovered_services column to agents for existing databases.
+  try { sqlite.exec(`ALTER TABLE agents ADD COLUMN discovered_services TEXT;`); } catch { /* exists */ }
 
   // Add WORM columns to backup_jobs for existing databases.
   for (const [col, def] of [
