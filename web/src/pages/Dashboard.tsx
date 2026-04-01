@@ -87,13 +87,16 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {snapshots.slice(0, 10).map((s) => (
-                  <tr key={s.id}>
-                    <td style={{ fontSize: 12, fontFamily: "monospace", color: "var(--text-muted)" }}>{s.jobId.slice(0, 8)}</td>
-                    <td><StatusBadge status={s.status} /></td>
-                    <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{fmt(s.startedAt)}</td>
-                  </tr>
-                ))}
+                {snapshots.slice(0, 10).map((s) => {
+                  const job = jobs.find((j) => j.id === s.jobId);
+                  return (
+                    <tr key={s.id}>
+                      <td style={{ fontSize: 12, fontWeight: 500 }}>{job?.name ?? s.jobId.slice(0, 8)}</td>
+                      <td><StatusBadge status={s.status} /></td>
+                      <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{fmt(s.startedAt)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Snapshot, type SnapshotLog } from "../api/client.ts";
-import { Camera, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw } from "lucide-react";
 
 export default function Snapshots() {
   const qc = useQueryClient();
@@ -10,8 +10,16 @@ export default function Snapshots() {
   const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [restoreDialog, setRestoreDialog] = useState<{ snapshotId: string } | null>(null);
+  const [restorePath, setRestorePath] = useState("");
+  const [restoreMsg, setRestoreMsg] = useState("");
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
+  const restoreMut = useMutation({
+    mutationFn: ({ id, path }: { id: string; path: string }) => api.restoreSnapshot(id, path),
+    onSuccess: () => { setRestoreMsg("Restore triggered successfully."); },
+    onError: (e: Error) => { setRestoreMsg(`Error: ${e.message}`); },
+  });
 
   const filtered = statusFilter === "all" ? snapshots : snapshots.filter((s) => s.status === statusFilter);
 
@@ -26,6 +34,27 @@ export default function Snapshots() {
           ))}
         </div>
       </div>
+
+      {/* Restore Dialog */}
+      {restoreDialog && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div className="card" style={{ width: 440, background: "var(--bg-secondary)" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Restore Snapshot</h3>
+            {restoreMsg && <div className={`alert ${restoreMsg.startsWith("Error") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 10 }}>{restoreMsg}</div>}
+            <div className="form-group">
+              <label>Restore to path</label>
+              <input value={restorePath} onChange={(e) => setRestorePath(e.target.value)} placeholder="/tmp/restore" autoFocus />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-primary" disabled={!restorePath || restoreMut.isPending}
+                onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: restorePath }); }}>
+                {restoreMut.isPending ? "Restoring…" : "Restore"}
+              </button>
+              <button className="btn-ghost" onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 40 }}><div className="spinner" style={{ margin: "0 auto" }} /></div>
@@ -54,6 +83,12 @@ export default function Snapshots() {
                       <td>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                           {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          {s.status === "success" && (
+                            <button className="btn-ghost" style={{ padding: "3px 6px" }} title="Restore"
+                              onClick={(e) => { e.stopPropagation(); setRestoreDialog({ snapshotId: s.id }); setRestorePath(""); setRestoreMsg(""); }}>
+                              <RotateCcw size={12} color="var(--primary)" />
+                            </button>
+                          )}
                           <button className="btn-ghost" style={{ padding: "3px 6px" }}
                             onClick={(e) => { e.stopPropagation(); if (confirm("Delete snapshot?")) deleteMut.mutate(s.id); }}>
                             <Trash2 size={12} color="var(--danger)" />

@@ -6,6 +6,7 @@ import { users, notificationSettings, auditLog } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
+import { encrypt, decrypt } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
 
 export const settingsRouter = Router();
@@ -27,9 +28,18 @@ settingsRouter.get("/notifications", requireAuth, (_req, res) => {
     });
     return;
   }
+
+  // Decrypt SMTP password before returning (omit the raw encrypted field)
+  let smtpPassDecrypted: string | undefined;
+  if (row.smtpPassEncrypted) {
+    try { smtpPassDecrypted = decrypt(row.smtpPassEncrypted); } catch { /* ignore */ }
+  }
+
+  const { smtpPassEncrypted: _omit, ...rest } = row;
   res.json({
-    ...row,
+    ...rest,
     emailRecipients: JSON.parse(row.emailRecipients ?? "[]"),
+    smtpPass: smtpPassDecrypted,
   });
 });
 
@@ -57,27 +67,35 @@ settingsRouter.put("/notifications", requireAuth, requireRole("admin"), (req, re
   const db = getDb();
   const data = parse.data;
 
-  db.insert(notificationSettings).values({
-    id: "singleton",
+  // Encrypt password if provided; otherwise preserve existing encrypted value
+  let smtpPassEncrypted: string | null = null;
+  if (data.smtpPass) {
+    smtpPassEncrypted = encrypt(data.smtpPass);
+  } else {
+    // Keep existing encrypted password
+    const [existing] = db.select({ smtpPassEncrypted: notificationSettings.smtpPassEncrypted }).from(notificationSettings).all();
+    smtpPassEncrypted = existing?.smtpPassEncrypted ?? null;
+  }
+
+  const baseValues = {
     emailEnabled: data.emailEnabled,
     emailRecipients: JSON.stringify(data.emailRecipients),
     notifyOnStart: data.notifyOnStart,
     notifyOnSuccess: data.notifyOnSuccess,
     notifyOnFailure: data.notifyOnFailure,
+    smtpHost: data.smtpHost ?? null,
+    smtpPort: data.smtpPort ?? null,
+    smtpUser: data.smtpUser ?? null,
+    smtpPassEncrypted,
+    smtpFrom: data.smtpFrom ?? null,
     updatedAt: new Date().toISOString(),
-  }).onConflictDoUpdate({
-    target: notificationSettings.id,
-    set: {
-      emailEnabled: data.emailEnabled,
-      emailRecipients: JSON.stringify(data.emailRecipients),
-      notifyOnStart: data.notifyOnStart,
-      notifyOnSuccess: data.notifyOnSuccess,
-      notifyOnFailure: data.notifyOnFailure,
-      updatedAt: new Date().toISOString(),
-    },
-  }).run();
+  };
 
-  logger.info({ adminId: "system" }, "Notification settings updated");
+  db.insert(notificationSettings).values({ id: "singleton", ...baseValues })
+    .onConflictDoUpdate({ target: notificationSettings.id, set: baseValues })
+    .run();
+
+  logger.info({ adminId: req.user?.id ?? "system" }, "Notification settings updated");
   res.json({ message: "Notification settings saved" });
 });
 

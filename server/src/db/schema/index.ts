@@ -113,6 +113,11 @@ export const notificationSettings = sqliteTable("notification_settings", {
   notifyOnStart: integer("notify_on_start", { mode: "boolean" }).notNull().default(false),
   notifyOnSuccess: integer("notify_on_success", { mode: "boolean" }).notNull().default(true),
   notifyOnFailure: integer("notify_on_failure", { mode: "boolean" }).notNull().default(true),
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpUser: text("smtp_user"),
+  smtpPassEncrypted: text("smtp_pass_encrypted"), // AES-256-GCM encrypted
+  smtpFrom: text("smtp_from"),
   updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 

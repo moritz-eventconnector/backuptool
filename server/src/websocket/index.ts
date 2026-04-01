@@ -24,10 +24,11 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { logger } from "../logger.js";
 import { getDb } from "../db/index.js";
-import { agents, snapshots, snapshotLogs } from "../db/schema/index.js";
+import { agents, snapshots, snapshotLogs, notificationSettings, backupJobs } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { sha256 } from "../crypto/encryption.js";
+import { sha256, decrypt } from "../crypto/encryption.js";
+import { sendBackupNotification } from "../notifications/email.js";
 
 // Map: agentId → WebSocket connection
 const agentConnections = new Map<string, WebSocket>();
@@ -153,6 +154,54 @@ export function initWebSocket(server: Server): WebSocketServer {
               .set({ status: "online" })
               .where(eq(agents.id, agentId))
               .run();
+
+            // Send email notification (fire-and-forget)
+            try {
+              const [notifRow] = db.select().from(notificationSettings).all();
+              const shouldNotify =
+                notifRow?.emailEnabled &&
+                ((status === "success" && notifRow.notifyOnSuccess) ||
+                  (status === "failed" && notifRow.notifyOnFailure));
+
+              if (shouldNotify && notifRow) {
+                const recipients: string[] = JSON.parse(notifRow.emailRecipients ?? "[]");
+                if (recipients.length > 0) {
+                  // Look up job + agent names for email body
+                  const [snap] = db.select().from(snapshots).where(eq(snapshots.id, snapshotId)).all();
+                  const [job] = snap?.jobId
+                    ? db.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all()
+                    : [];
+                  const [agentRow] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).all();
+
+                  // Decrypt SMTP password if stored
+                  let smtpPass: string | undefined;
+                  if (notifRow.smtpPassEncrypted) {
+                    try { smtpPass = decrypt(notifRow.smtpPassEncrypted); } catch { /* ignore */ }
+                  }
+
+                  sendBackupNotification(recipients, {
+                    jobName: job?.name ?? snap?.jobId ?? "unknown",
+                    agentName: agentRow?.name ?? agentId,
+                    status: status as "success" | "failed",
+                    startedAt: snap?.startedAt ?? new Date().toISOString(),
+                    finishedAt: snap?.finishedAt ?? undefined,
+                    sizeBytes: msg.sizeBytes as number | undefined,
+                    fileCount: msg.fileCount as number | undefined,
+                    durationSeconds: msg.durationSeconds as number | undefined,
+                    errorMessage: msg.errorMessage as string | undefined,
+                    snapshotId,
+                  }, {
+                    smtpHost: notifRow.smtpHost,
+                    smtpPort: notifRow.smtpPort,
+                    smtpUser: notifRow.smtpUser,
+                    smtpFrom: notifRow.smtpFrom,
+                    smtpPass,
+                  }).catch((err) => logger.error({ err }, "Email notification failed"));
+                }
+              }
+            } catch (err) {
+              logger.error({ err }, "Error preparing email notification");
+            }
           }
           broadcastToUi({ type: "snapshot_done", agentId, ...msg });
           return;

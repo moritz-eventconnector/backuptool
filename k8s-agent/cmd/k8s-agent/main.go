@@ -204,7 +204,31 @@ func handleConnection(
 
 		case "restore":
 			resticSnapshotID, _ := msg["resticSnapshotId"].(string)
-			log.Printf("Restore requested for snapshot %s — not yet supported by k8s agent", resticSnapshotID)
+			jobID, _ := msg["jobId"].(string)
+			restorePath, _ := msg["restorePath"].(string)
+			if restorePath == "" {
+				restorePath = "/tmp/restore-" + resticSnapshotID
+			}
+			go func() {
+				jobs, err := srv.GetJobConfigs()
+				if err != nil {
+					log.Printf("Restore: fetch jobs failed: %v", err)
+					return
+				}
+				for _, j := range jobs {
+					if j.ID == jobID && len(j.Destinations) > 0 {
+						d := j.Destinations[0]
+						dest := &backup.Destination{ID: d.ID, Name: d.Name, Type: d.Type, Config: d.Config}
+						if err := runner.Restore(ctx, dest, resticSnapshotID, restorePath, j.ResticPassword); err != nil {
+							log.Printf("Restore snapshot %s failed: %v", resticSnapshotID, err)
+						} else {
+							log.Printf("Restore snapshot %s → %s completed", resticSnapshotID, restorePath)
+						}
+						return
+					}
+				}
+				log.Printf("Restore: job %s not found", jobID)
+			}()
 
 		case "pong":
 			// heartbeat response — ignore

@@ -408,6 +408,63 @@ func (r *K8sBackupRunner) buildRepoURLAndEnv(dest *Destination) (string, []strin
 	}
 }
 
+// Restore extracts a restic snapshot into restorePath and then applies all
+// YAML manifests found in that directory with `kubectl apply`.
+func (r *K8sBackupRunner) Restore(
+	ctx context.Context,
+	dest *Destination,
+	resticSnapshotID string,
+	restorePath string,
+	password string,
+) error {
+	repoURL, env, err := r.buildRepoURLAndEnv(dest)
+	if err != nil {
+		return fmt.Errorf("build repo config: %w", err)
+	}
+	env = append(env, "RESTIC_PASSWORD="+password)
+
+	if err := os.MkdirAll(restorePath, 0750); err != nil {
+		return fmt.Errorf("create restore dir: %w", err)
+	}
+
+	// restic restore <snapshotID> --target <path>
+	args := []string{"restore", resticSnapshotID, "--target", restorePath}
+	cmd := exec.CommandContext(ctx, r.ResticBin, args...)
+	cmd.Env = append(os.Environ(), append(env, "RESTIC_REPOSITORY="+repoURL)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("restic restore: %v\n%s", err, string(out))
+	}
+
+	// Apply all YAML manifests found recursively under the restore path.
+	return applyYAMLManifests(ctx, restorePath)
+}
+
+// applyYAMLManifests recursively walks restorePath and runs
+// `kubectl apply -f <file>` for every *.yaml / *.yml file found.
+func applyYAMLManifests(ctx context.Context, restorePath string) error {
+	var applyErrors []string
+	err := filepath.Walk(restorePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
+			return nil
+		}
+		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", path)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			applyErrors = append(applyErrors, fmt.Sprintf("%s: %v\n%s", filepath.Base(path), err, string(out)))
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(applyErrors) > 0 {
+		return fmt.Errorf("kubectl apply errors:\n%s", strings.Join(applyErrors, "\n"))
+	}
+	return nil
+}
+
 // --- helpers ----------------------------------------------------------------
 
 func failResult(snapshotID string, err error) *Result {
