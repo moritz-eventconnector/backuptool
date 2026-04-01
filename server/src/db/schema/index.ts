@@ -108,6 +108,7 @@ export const license = sqliteTable("license", {
 // ── Notification Settings ─────────────────────────────────────────────────────
 export const notificationSettings = sqliteTable("notification_settings", {
   id: text("id").primaryKey().default("singleton"),
+  // ── Email ──────────────────────────────────────────────────────────────────
   emailEnabled: integer("email_enabled", { mode: "boolean" }).notNull().default(false),
   emailRecipients: text("email_recipients").notNull().default("[]"), // JSON array
   notifyOnStart: integer("notify_on_start", { mode: "boolean" }).notNull().default(false),
@@ -118,6 +119,13 @@ export const notificationSettings = sqliteTable("notification_settings", {
   smtpUser: text("smtp_user"),
   smtpPassEncrypted: text("smtp_pass_encrypted"), // AES-256-GCM encrypted
   smtpFrom: text("smtp_from"),
+  // ── Webhook ────────────────────────────────────────────────────────────────
+  webhookEnabled: integer("webhook_enabled", { mode: "boolean" }).notNull().default(false),
+  webhookUrl: text("webhook_url"),                 // target URL
+  webhookType: text("webhook_type").default("generic"), // "slack"|"ntfy"|"discord"|"generic"
+  webhookOnStart: integer("webhook_on_start", { mode: "boolean" }).notNull().default(false),
+  webhookOnSuccess: integer("webhook_on_success", { mode: "boolean" }).notNull().default(true),
+  webhookOnFailure: integer("webhook_on_failure", { mode: "boolean" }).notNull().default(true),
   updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 

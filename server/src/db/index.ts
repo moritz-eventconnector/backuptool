@@ -144,6 +144,12 @@ export async function initDb(): Promise<void> {
       smtp_user TEXT,
       smtp_pass_encrypted TEXT,
       smtp_from TEXT,
+      webhook_enabled INTEGER NOT NULL DEFAULT 0,
+      webhook_url TEXT,
+      webhook_type TEXT DEFAULT 'generic',
+      webhook_on_start INTEGER NOT NULL DEFAULT 0,
+      webhook_on_success INTEGER NOT NULL DEFAULT 1,
+      webhook_on_failure INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
 
@@ -186,6 +192,24 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
   `);
+
+  // Add webhook columns to notification_settings for existing databases.
+  // SQLite does not support "ADD COLUMN IF NOT EXISTS", so we catch the error.
+  const webhookCols: [string, string][] = [
+    ["webhook_enabled", "INTEGER NOT NULL DEFAULT 0"],
+    ["webhook_url", "TEXT"],
+    ["webhook_type", "TEXT DEFAULT 'generic'"],
+    ["webhook_on_start", "INTEGER NOT NULL DEFAULT 0"],
+    ["webhook_on_success", "INTEGER NOT NULL DEFAULT 1"],
+    ["webhook_on_failure", "INTEGER NOT NULL DEFAULT 1"],
+  ];
+  for (const [col, def] of webhookCols) {
+    try {
+      sqlite.exec(`ALTER TABLE notification_settings ADD COLUMN ${col} ${def};`);
+    } catch {
+      // Column already exists — safe to ignore
+    }
+  }
 
   logger.info({ path: config.dbPath }, "Database initialized");
 }

@@ -200,6 +200,12 @@ export interface NotificationSettings {
   smtpUser?: string;
   smtpPass?: string;
   smtpFrom?: string;
+  webhookEnabled: boolean;
+  webhookUrl?: string;
+  webhookType?: "slack" | "ntfy" | "discord" | "generic";
+  webhookOnStart: boolean;
+  webhookOnSuccess: boolean;
+  webhookOnFailure: boolean;
 }
 
 export interface LicenseInfo {

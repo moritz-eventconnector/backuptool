@@ -29,6 +29,7 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { sha256, decrypt } from "../crypto/encryption.js";
 import { sendBackupNotification } from "../notifications/email.js";
+import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
 
 // Map: agentId → WebSocket connection
 const agentConnections = new Map<string, WebSocket>();
@@ -201,6 +202,43 @@ export function initWebSocket(server: Server): WebSocketServer {
               }
             } catch (err) {
               logger.error({ err }, "Error preparing email notification");
+            }
+
+            // ── Webhook notification ──────────────────────────────────────
+            try {
+              const [notifRow] = db.select().from(notificationSettings).all();
+              const shouldWebhook =
+                notifRow?.webhookEnabled &&
+                notifRow.webhookUrl &&
+                ((status === "success" && notifRow.webhookOnSuccess) ||
+                  (status === "failed" && notifRow.webhookOnFailure));
+
+              if (shouldWebhook && notifRow?.webhookUrl) {
+                const [snap] = db.select().from(snapshots).where(eq(snapshots.id, snapshotId)).all();
+                const [job] = snap?.jobId
+                  ? db.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all()
+                  : [];
+                const [agentRow] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).all();
+
+                sendWebhookNotification(
+                  notifRow.webhookUrl,
+                  (notifRow.webhookType ?? "generic") as WebhookType,
+                  {
+                    jobName: job?.name ?? snap?.jobId ?? "unknown",
+                    agentName: agentRow?.name ?? agentId,
+                    status: status as "success" | "failed",
+                    startedAt: snap?.startedAt ?? new Date().toISOString(),
+                    finishedAt: snap?.finishedAt ?? undefined,
+                    sizeBytes: msg.sizeBytes as number | undefined,
+                    fileCount: msg.fileCount as number | undefined,
+                    durationSeconds: msg.durationSeconds as number | undefined,
+                    errorMessage: msg.errorMessage as string | undefined,
+                    snapshotId,
+                  },
+                ).catch((err) => logger.error({ err }, "Webhook notification failed"));
+              }
+            } catch (err) {
+              logger.error({ err }, "Error preparing webhook notification");
             }
           }
           broadcastToUi({ type: "snapshot_done", agentId, ...msg });

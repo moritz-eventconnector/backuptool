@@ -2,8 +2,9 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.tsx";
 import {
   LayoutDashboard, Server, Briefcase, Camera, HardDrive,
-  Key, Settings, LogOut, Shield,
+  Key, Settings, LogOut,
 } from "lucide-react";
+import logoFull from "../assets/logo-full.svg";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -32,9 +33,8 @@ export default function Layout() {
         display: "flex", flexDirection: "column", flexShrink: 0,
       }}>
         {/* Logo */}
-        <div style={{ padding: "20px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
-          <Shield size={22} color="var(--primary)" />
-          <span style={{ fontWeight: 700, fontSize: 16 }}>BackupTool</span>
+        <div style={{ padding: "16px", borderBottom: "1px solid var(--border)" }}>
+          <img src={logoFull} alt="BackupTool" style={{ height: 44, width: "auto", display: "block" }} />
         </div>
 
         {/* Nav */}

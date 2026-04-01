@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.tsx";
-import { Shield } from "lucide-react";
 import { config } from "../config.ts";
+import logo from "../assets/logo.svg";
 
 export default function Login() {
   const { login } = useAuth();
@@ -30,8 +30,8 @@ export default function Login() {
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
       <div style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 56, height: 56, background: "rgba(99,102,241,.15)", borderRadius: 14, marginBottom: 16 }}>
-            <Shield size={28} color="var(--primary)" />
+          <div style={{ marginBottom: 16 }}>
+            <img src={logo} alt="BackupTool" style={{ height: 60, width: 60, display: "inline-block" }} />
           </div>
           <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>BackupTool</h1>
           <p style={{ color: "var(--text-muted)" }}>Sign in to your account</p>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Mail, Shield, Users, Plus, Trash2 } from "lucide-react";
+import { Settings as SettingsIcon, Mail, Shield, Users, Plus, Trash2, Webhook } from "lucide-react";
 import { api, type User } from "../api/client";
 
 export default function Settings() {
@@ -14,7 +14,8 @@ export default function Settings() {
           <nav className="sidebar-nav" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
               { id: "general", label: "General", icon: SettingsIcon },
-              { id: "notifications", label: "Notifications", icon: Mail },
+              { id: "notifications", label: "Email", icon: Mail },
+              { id: "webhooks", label: "Webhooks", icon: Webhook },
               { id: "sso", label: "SSO / Auth", icon: Shield },
               { id: "users", label: "Users", icon: Users },
             ].map((t) => (
@@ -31,6 +32,7 @@ export default function Settings() {
         <div style={{ flex: 1 }}>
           {activeTab === "general" && <GeneralSettings />}
           {activeTab === "notifications" && <NotificationSettings />}
+          {activeTab === "webhooks" && <WebhookSettings />}
           {activeTab === "sso" && <SsoSettings />}
           {activeTab === "users" && <UserSettings />}
         </div>
@@ -142,6 +144,124 @@ function NotificationSettings() {
       <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
         {save.isPending ? "Saving…" : "Save"}
       </button>
+    </div>
+  );
+}
+
+function WebhookSettings() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["notif-settings"], queryFn: api.getNotificationSettings });
+
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [url, setUrl] = useState("");
+  const [type, setType] = useState<"slack" | "ntfy" | "discord" | "generic">("generic");
+  const [onStart, setOnStart] = useState(false);
+  const [onSuccess, setOnSuccess] = useState(true);
+  const [onFailure, setOnFailure] = useState(true);
+  const [testResult, setTestResult] = useState("");
+
+  const eff = enabled ?? data?.webhookEnabled ?? false;
+
+  if (data && enabled === null) {
+    setEnabled(data.webhookEnabled ?? false);
+    setUrl(data.webhookUrl ?? "");
+    setType((data.webhookType ?? "generic") as typeof type);
+    setOnStart(data.webhookOnStart ?? false);
+    setOnSuccess(data.webhookOnSuccess ?? true);
+    setOnFailure(data.webhookOnFailure ?? true);
+  }
+
+  const save = useMutation({
+    mutationFn: () => api.saveNotificationSettings({
+      // carry over existing email fields from loaded data
+      emailEnabled: data?.emailEnabled ?? false,
+      emailRecipients: data?.emailRecipients ?? [],
+      notifyOnStart: data?.notifyOnStart ?? false,
+      notifyOnSuccess: data?.notifyOnSuccess ?? true,
+      notifyOnFailure: data?.notifyOnFailure ?? true,
+      smtpHost: data?.smtpHost,
+      smtpPort: data?.smtpPort,
+      smtpUser: data?.smtpUser,
+      smtpFrom: data?.smtpFrom,
+      webhookEnabled: eff,
+      webhookUrl: url,
+      webhookType: type,
+      webhookOnStart: onStart,
+      webhookOnSuccess: onSuccess,
+      webhookOnFailure: onFailure,
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notif-settings"] }),
+  });
+
+  const TYPE_HINTS: Record<string, string> = {
+    slack: "Slack Incoming Webhook — e.g. https://hooks.slack.com/services/T…/B…/…",
+    ntfy: "ntfy topic URL — e.g. https://ntfy.sh/my-topic",
+    discord: "Discord Webhook — e.g. https://discord.com/api/webhooks/…",
+    generic: "Any HTTP endpoint — receives a JSON body with event details",
+  };
+
+  if (isLoading) return <div className="card"><p style={{ color: "var(--text-muted)" }}>Loading…</p></div>;
+
+  return (
+    <div className="card">
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Webhook Notifications</h2>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
+        Send notifications to Slack, ntfy, Discord or any HTTP endpoint when a backup finishes.
+      </p>
+
+      {save.isSuccess && <div className="alert alert-success" style={{ marginBottom: 12 }}>Webhook settings saved.</div>}
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 12 }}>{(save.error as Error).message}</div>}
+      {testResult && <div className={`alert ${testResult.startsWith("Error") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 12 }}>{testResult}</div>}
+
+      <div className="form-group">
+        <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)", cursor: "pointer" }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={eff} onChange={(e) => setEnabled(e.target.checked)} />
+          Enable Webhook Notifications
+        </label>
+      </div>
+
+      {eff && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 12, marginBottom: 12 }}>
+            <div className="form-group">
+              <label>Provider</label>
+              <select value={type} onChange={(e) => setType(e.target.value as typeof type)}>
+                <option value="generic">Generic HTTP</option>
+                <option value="slack">Slack</option>
+                <option value="ntfy">ntfy</option>
+                <option value="discord">Discord</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Webhook URL</label>
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={TYPE_HINTS[type]} />
+              <small style={{ color: "var(--text-muted)", fontSize: 11 }}>{TYPE_HINTS[type]}</small>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>Send notification when:</div>
+            <div style={{ display: "flex", gap: 16 }}>
+              {[
+                { label: "Job started", checked: onStart, set: setOnStart },
+                { label: "Job succeeded", checked: onSuccess, set: setOnSuccess },
+                { label: "Job failed", checked: onFailure, set: setOnFailure },
+              ].map((item) => (
+                <label key={item.label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--text)", fontSize: 13 }}>
+                  <input type="checkbox" style={{ width: "auto" }} checked={item.checked} onChange={(e) => item.set(e.target.checked)} />
+                  {item.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
     </div>
   );
 }

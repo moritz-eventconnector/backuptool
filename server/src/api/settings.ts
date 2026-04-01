@@ -40,10 +40,12 @@ settingsRouter.get("/notifications", requireAuth, (_req, res) => {
     ...rest,
     emailRecipients: JSON.parse(row.emailRecipients ?? "[]"),
     smtpPass: smtpPassDecrypted,
+    // webhook fields are plain-text — already included via ...rest
   });
 });
 
 const notifSchema = z.object({
+  // Email
   emailEnabled: z.boolean(),
   emailRecipients: z.array(z.string().email()).default([]),
   notifyOnStart: z.boolean().default(false),
@@ -54,6 +56,13 @@ const notifSchema = z.object({
   smtpUser: z.string().optional(),
   smtpPass: z.string().optional(),
   smtpFrom: z.string().optional(),
+  // Webhook
+  webhookEnabled: z.boolean().default(false),
+  webhookUrl: z.string().url().optional().or(z.literal("")),
+  webhookType: z.enum(["slack", "ntfy", "discord", "generic"]).default("generic"),
+  webhookOnStart: z.boolean().default(false),
+  webhookOnSuccess: z.boolean().default(true),
+  webhookOnFailure: z.boolean().default(true),
 });
 
 // PUT /api/settings/notifications
@@ -88,6 +97,12 @@ settingsRouter.put("/notifications", requireAuth, requireRole("admin"), (req, re
     smtpUser: data.smtpUser ?? null,
     smtpPassEncrypted,
     smtpFrom: data.smtpFrom ?? null,
+    webhookEnabled: data.webhookEnabled,
+    webhookUrl: data.webhookUrl || null,
+    webhookType: data.webhookType,
+    webhookOnStart: data.webhookOnStart,
+    webhookOnSuccess: data.webhookOnSuccess,
+    webhookOnFailure: data.webhookOnFailure,
     updatedAt: new Date().toISOString(),
   };
 

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" fill="none">
+  <defs>
+    <linearGradient id="sg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="ag" x1="32" y1="14" x2="32" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c4b5fd" stop-opacity="0.85"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Shield -->
+  <path d="M32 4 L56 13 L56 32 C56 44.5 45.5 54.5 32 60 C18.5 54.5 8 44.5 8 32 L8 13 Z"
+        fill="url(#sg)" filter="url(#glow)"/>
+  <path d="M32 9 L51 17 L51 32 C51 41.8 42.5 50.5 32 55.5 C21.5 50.5 13 41.8 13 32 L13 17 Z"
+        fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+  <path d="M32 42 L32 24" stroke="url(#ag)" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M22 31 L32 19 L42 31" stroke="url(#ag)" stroke-width="3.5"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M23 43.5 L41 43.5" stroke="url(#ag)" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Wordmark: "BackupTool" -->
+  <text x="72" y="28" font-family="system-ui, -apple-system, sans-serif"
+        font-size="17" font-weight="700" fill="#f1f5f9" letter-spacing="-0.3">Backup</text>
+  <text x="72" y="47" font-family="system-ui, -apple-system, sans-serif"
+        font-size="13" font-weight="400" fill="#94a3b8" letter-spacing="0.5">TOOL</text>
+</svg>
