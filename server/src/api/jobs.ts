@@ -32,6 +32,8 @@ const createJobSchema = z.object({
   retryDelaySeconds: z.number().int().min(0).default(60),
   tags: z.array(z.string()).default([]),
   enabled: z.boolean().default(true),
+  wormEnabled: z.boolean().default(false),
+  wormRetentionDays: z.number().int().min(0).max(36500).default(0),
 });
 
 // GET /api/jobs
@@ -88,6 +90,8 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
     retryDelaySeconds: parse.data.retryDelaySeconds,
     tags: JSON.stringify(parse.data.tags),
     enabled: parse.data.enabled,
+    wormEnabled: parse.data.wormEnabled,
+    wormRetentionDays: parse.data.wormRetentionDays,
   }).run();
 
   // Push updated job list to agent via WebSocket
@@ -124,6 +128,8 @@ jobsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (req, res)
   if ("maxRetries" in parse.data) updates.maxRetries = parse.data.maxRetries;
   if ("retryDelaySeconds" in parse.data) updates.retryDelaySeconds = parse.data.retryDelaySeconds;
   if ("enabled" in parse.data) updates.enabled = parse.data.enabled;
+  if ("wormEnabled" in parse.data) updates.wormEnabled = parse.data.wormEnabled;
+  if ("wormRetentionDays" in parse.data) updates.wormRetentionDays = parse.data.wormRetentionDays;
 
   db.update(backupJobs)
     .set(updates as Parameters<ReturnType<typeof db.update>["set"]>[0])

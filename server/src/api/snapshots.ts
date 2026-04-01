@@ -114,6 +114,28 @@ snapshotsRouter.delete("/:id", requireAuth, (req, res) => {
     return;
   }
 
+  // ── WORM enforcement ───────────────────────────────────────────────────────
+  // Look up the job to check whether WORM is active and compute the unlock date.
+  const [job] = db.select({
+    wormEnabled: backupJobs.wormEnabled,
+    wormRetentionDays: backupJobs.wormRetentionDays,
+  }).from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
+
+  if (job?.wormEnabled && job.wormRetentionDays > 0) {
+    const startedMs = new Date(snap.startedAt).getTime();
+    const unlockMs = startedMs + job.wormRetentionDays * 86_400_000;
+    const nowMs = Date.now();
+    if (nowMs < unlockMs) {
+      const unlockDate = new Date(unlockMs).toISOString();
+      res.status(423).json({
+        error: "WORM lock active: this snapshot cannot be deleted before the retention period expires",
+        lockedUntil: unlockDate,
+        wormRetentionDays: job.wormRetentionDays,
+      });
+      return;
+    }
+  }
+
   if (snap.resticSnapshotId) {
     sendToAgent(snap.agentId, {
       type: "forget_snapshot",

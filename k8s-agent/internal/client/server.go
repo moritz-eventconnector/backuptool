@@ -96,6 +96,8 @@ type JobConfig struct {
 	Enabled           bool                   `json:"enabled"`
 	Destinations      []DestinationConfig    `json:"destinations"`
 	ResticPassword    string                 `json:"resticPassword"`
+	WormEnabled       bool                   `json:"wormEnabled"`
+	WormRetentionDays int                    `json:"wormRetentionDays"`
 }
 
 // DestinationConfig is a decrypted destination config from the server.

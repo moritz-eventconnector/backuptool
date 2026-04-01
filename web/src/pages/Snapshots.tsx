@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Snapshot, type SnapshotLog } from "../api/client.ts";
-import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock } from "lucide-react";
 
 export default function Snapshots() {
   const qc = useQueryClient();
@@ -70,11 +70,27 @@ export default function Snapshots() {
               {filtered.map((s) => {
                 const job = jobs.find((j) => j.id === s.jobId);
                 const agent = agents.find((a) => a.id === s.agentId);
+
+                // WORM lock state
+                const wormLocked = (() => {
+                  if (!job?.wormEnabled || !job.wormRetentionDays) return null;
+                  const unlockMs = new Date(s.startedAt).getTime() + job.wormRetentionDays * 86_400_000;
+                  if (Date.now() < unlockMs) return new Date(unlockMs);
+                  return null;
+                })();
+
                 return (
                   <>
                     <tr key={s.id} style={{ cursor: "pointer" }} onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
                       <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{fmt(s.startedAt)}</td>
-                      <td style={{ fontWeight: 500 }}>{job?.name ?? s.jobId.slice(0, 8)}</td>
+                      <td style={{ fontWeight: 500 }}>
+                        {job?.name ?? s.jobId.slice(0, 8)}
+                        {job?.wormEnabled && (
+                          <span title={wormLocked ? `Locked until ${wormLocked.toLocaleDateString()}` : "WORM (unlocked)"} style={{ marginLeft: 6, display: "inline-flex", verticalAlign: "middle" }}>
+                            <Lock size={11} color={wormLocked ? "var(--warning, #f59e0b)" : "var(--text-muted)"} />
+                          </span>
+                        )}
+                      </td>
                       <td style={{ color: "var(--text-muted)" }}>{agent?.name ?? s.agentId.slice(0, 8)}</td>
                       <td><StatusBadge status={s.status} /></td>
                       <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.sizeBytes ? fmtSize(s.sizeBytes) : "—"}</td>
@@ -89,10 +105,17 @@ export default function Snapshots() {
                               <RotateCcw size={12} color="var(--primary)" />
                             </button>
                           )}
-                          <button className="btn-ghost" style={{ padding: "3px 6px" }}
-                            onClick={(e) => { e.stopPropagation(); if (confirm("Delete snapshot?")) deleteMut.mutate(s.id); }}>
-                            <Trash2 size={12} color="var(--danger)" />
-                          </button>
+                          {wormLocked ? (
+                            <span title={`WORM locked until ${wormLocked.toLocaleDateString()} — deletion not permitted`}
+                              style={{ padding: "3px 6px", display: "inline-flex", alignItems: "center", opacity: 0.5, cursor: "not-allowed" }}>
+                              <Lock size={12} color="var(--warning, #f59e0b)" />
+                            </span>
+                          ) : (
+                            <button className="btn-ghost" style={{ padding: "3px 6px" }}
+                              onClick={(e) => { e.stopPropagation(); if (confirm("Delete snapshot?")) deleteMut.mutate(s.id); }}>
+                              <Trash2 size={12} color="var(--danger)" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

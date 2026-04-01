@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Job } from "../api/client.ts";
-import { Plus, Trash2, Play, Pencil, Briefcase } from "lucide-react";
+import { Plus, Trash2, Play, Pencil, Briefcase, Lock } from "lucide-react";
 
 export default function Jobs() {
   const qc = useQueryClient();
@@ -52,9 +52,16 @@ export default function Jobs() {
                     <td style={{ color: "var(--text-muted)" }}>{agent?.name ?? j.agentId.slice(0, 8)}</td>
                     <td><code style={{ fontSize: 12, color: "var(--text-muted)" }}>{j.schedule ?? "Manual"}</code></td>
                     <td>
-                      <span className={`badge ${j.enabled ? "badge-success" : "badge-muted"}`}>
-                        {j.enabled ? "Enabled" : "Disabled"}
-                      </span>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        <span className={`badge ${j.enabled ? "badge-success" : "badge-muted"}`}>
+                          {j.enabled ? "Enabled" : "Disabled"}
+                        </span>
+                        {j.wormEnabled && (
+                          <span className="badge badge-warning" title={`WORM: ${j.wormRetentionDays}d retention`} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                            <Lock size={10} /> WORM
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
@@ -113,6 +120,8 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
   const [postScript, setPostScript] = useState(job?.postScript ?? "");
   const [excludePatterns, setExcludePatterns] = useState(job?.excludePatterns.join("\n") ?? "");
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
+  const [wormEnabled, setWormEnabled] = useState(job?.wormEnabled ?? false);
+  const [wormDays, setWormDays] = useState(job?.wormRetentionDays?.toString() ?? "30");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -138,6 +147,8 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
         postScript: postScript || undefined,
         excludePatterns: excludePatterns.split("\n").map((s) => s.trim()).filter(Boolean),
         enabled,
+        wormEnabled,
+        wormRetentionDays: parseInt(wormDays) || 0,
       };
       if (job) await api.updateJob(job.id, data);
       else await api.createJob(data);
@@ -231,6 +242,35 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
               Job Enabled
             </label>
           </div>
+
+          {/* WORM */}
+          <details style={{ marginBottom: 16 }}>
+            <summary style={{ cursor: "pointer", color: wormEnabled ? "var(--warning, #f59e0b)" : "var(--text-muted)", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+              <Lock size={13} /> Immutable Backups (WORM)
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
+                <strong>Write Once Read Many (WORM)</strong> prevents deletion of snapshots before the retention period expires. When combined with an <strong>S3 bucket with Object Lock enabled</strong>, restic writes every object in <code>COMPLIANCE</code> mode — making the data truly immutable even against admin deletion. Works with AWS S3, Wasabi, MinIO and any S3-compatible store that supports Object Lock.
+              </div>
+              <div className="form-group">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)", cursor: "pointer" }}>
+                  <input type="checkbox" style={{ width: "auto" }} checked={wormEnabled} onChange={(e) => setWormEnabled(e.target.checked)} />
+                  Enable WORM (immutable backup retention)
+                </label>
+              </div>
+              {wormEnabled && (
+                <div className="form-group" style={{ maxWidth: 220 }}>
+                  <label>Minimum retention (days)</label>
+                  <input type="number" min="1" max="36500" value={wormDays}
+                    onChange={(e) => setWormDays(e.target.value)}
+                    placeholder="30" />
+                  <small style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                    Snapshots cannot be deleted for this many days after creation.
+                  </small>
+                </div>
+              )}
+            </div>
+          </details>
 
           <div className="modal-footer">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>

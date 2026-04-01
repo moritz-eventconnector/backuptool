@@ -282,10 +282,12 @@ func runBackup(
 
 	// Build backup.Job from JobConfig
 	backupJob := &backup.Job{
-		ID:          job.ID,
-		Name:        job.Name,
-		SourcePaths: job.SourcePaths,
-		Schedule:    job.Schedule,
+		ID:                job.ID,
+		Name:              job.Name,
+		SourcePaths:       job.SourcePaths,
+		Schedule:          job.Schedule,
+		WormEnabled:       job.WormEnabled,
+		WormRetentionDays: job.WormRetentionDays,
 	}
 
 	result, err := runner.Run(ctx, backupJob, dest, namespace, snapshotID, job.ResticPassword, progressCh)

@@ -90,6 +90,8 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
       enabled: job.enabled,
       destinations: jobDestinations,
       resticPassword,
+      wormEnabled: job.wormEnabled ?? false,
+      wormRetentionDays: job.wormRetentionDays ?? 0,
     };
   });
 
@@ -142,5 +144,7 @@ internalRouter.get("/agents/:agentId/jobs/:jobId", requireAgentAuth, (req, res) 
     enabled: job.enabled,
     destinations: jobDestinations,
     resticPassword,
+    wormEnabled: job.wormEnabled ?? false,
+    wormRetentionDays: job.wormRetentionDays ?? 0,
   });
 });

@@ -14,17 +14,20 @@ import (
 
 // Job represents a backup job received from the server.
 type Job struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	SourcePaths      []string          `json:"sourcePaths"`
-	DestinationIds   []string          `json:"destinationIds"`
-	Schedule         string            `json:"schedule"`
-	Retention        RetentionPolicy   `json:"retention"`
-	PreScript        string            `json:"preScript"`
-	PostScript       string            `json:"postScript"`
-	ExcludePatterns  []string          `json:"excludePatterns"`
-	MaxRetries       int               `json:"maxRetries"`
-	RetryDelaySeconds int              `json:"retryDelaySeconds"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	SourcePaths       []string        `json:"sourcePaths"`
+	DestinationIds    []string        `json:"destinationIds"`
+	Schedule          string          `json:"schedule"`
+	Retention         RetentionPolicy `json:"retention"`
+	PreScript         string          `json:"preScript"`
+	PostScript        string          `json:"postScript"`
+	ExcludePatterns   []string        `json:"excludePatterns"`
+	MaxRetries        int             `json:"maxRetries"`
+	RetryDelaySeconds int             `json:"retryDelaySeconds"`
+	// WORM — immutable backup policy
+	WormEnabled       bool            `json:"wormEnabled"`
+	WormRetentionDays int             `json:"wormRetentionDays"`
 }
 
 type RetentionPolicy struct {
@@ -87,13 +90,20 @@ func (r *Runner) Run(
 
 	env = append(env, "RESTIC_PASSWORD="+password)
 
-	// Ensure repo is initialized
-	if err := r.initRepo(ctx, repoURL, env); err != nil {
+	// WORM: for S3-compatible backends, enable Object Lock so every object is
+	// written with a retention policy that matches wormRetentionDays.
+	// restic reads the lock duration from the backend option "s3.object-lock-mode"
+	// (COMPLIANCE) and sets the object retention header automatically.
+	wormBackendOpts := wormBackendOptions(job, dest)
+
+	// Ensure repo is initialized (with WORM options if applicable)
+	if err := r.initRepo(ctx, repoURL, env, wormBackendOpts); err != nil {
 		return nil, fmt.Errorf("init repo: %w", err)
 	}
 
 	// Build restic backup command
 	args := []string{"backup", "--json", "--verbose"}
+	args = append(args, wormBackendOpts...)
 	for _, p := range job.ExcludePatterns {
 		args = append(args, "--exclude="+p)
 	}
@@ -176,10 +186,12 @@ func (r *Runner) Run(
 		}, nil
 	}
 
-	// Apply retention policy
-	if err := r.applyRetention(ctx, job.Retention, repoURL, env); err != nil {
-		// Non-fatal: log but don't fail the backup
-		_ = err
+	// Apply retention policy — skip for WORM repos because objects are immutable
+	// and restic `forget --prune` cannot delete them anyway.
+	if !job.WormEnabled {
+		if err := r.applyRetention(ctx, job.Retention, repoURL, env); err != nil {
+			_ = err // non-fatal
+		}
 	}
 
 	return &Result{
@@ -277,22 +289,53 @@ func (r *Runner) ListSnapshots(ctx context.Context, dest *Destination, password 
 	return snaps, nil
 }
 
-func (r *Runner) initRepo(ctx context.Context, repoURL string, env []string) error {
+func (r *Runner) initRepo(ctx context.Context, repoURL string, env []string, extraArgs []string) error {
 	// Check if repo exists first
-	checkCmd := exec.CommandContext(ctx, r.ResticBin, "cat", "config")
+	checkArgs := append([]string{"cat", "config"}, extraArgs...)
+	checkCmd := exec.CommandContext(ctx, r.ResticBin, checkArgs...)
 	checkCmd.Env = append(os.Environ(), append(env, "RESTIC_REPOSITORY="+repoURL)...)
 	if err := checkCmd.Run(); err == nil {
 		return nil // repo already exists
 	}
 
-	// Init new repo
-	initCmd := exec.CommandContext(ctx, r.ResticBin, "init")
+	// Init new repo (pass WORM backend options if provided)
+	initArgs := append([]string{"init"}, extraArgs...)
+	initCmd := exec.CommandContext(ctx, r.ResticBin, initArgs...)
 	initCmd.Env = append(os.Environ(), append(env, "RESTIC_REPOSITORY="+repoURL)...)
 	out, err := initCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("restic init: %v\n%s", err, string(out))
 	}
 	return nil
+}
+
+// wormBackendOptions returns the restic --repo-backend-options flags needed to
+// enable S3 Object Lock (COMPLIANCE mode) for WORM-enabled jobs.
+// Only applicable for S3-compatible destinations; returns nil otherwise.
+func wormBackendOptions(job *Job, dest *Destination) []string {
+	if !job.WormEnabled || job.WormRetentionDays <= 0 {
+		return nil
+	}
+	switch dest.Type {
+	case "s3", "wasabi", "minio":
+		// Tell restic to set S3 Object Lock COMPLIANCE mode with the configured
+		// retention period. restic translates this to an x-amz-object-lock-*
+		// header on every PUT operation.
+		days := strconv.Itoa(job.WormRetentionDays)
+		return []string{
+			"--repo-backend-options", "s3.object-lock=true",
+			"--repo-backend-options", "s3.object-lock-mode=COMPLIANCE",
+			"--repo-backend-options", "s3.object-lock-retention-days=" + days,
+		}
+	case "b2":
+		// Backblaze B2 uses its own Object Lock API (called "Backblaze B2 Object Lock").
+		// restic does not currently expose a flag for B2 lock, but the bucket-level
+		// lock policy (set on the B2 bucket itself) already provides immutability.
+		// We still skip `forget` for WORM jobs (handled in Run).
+		return nil
+	default:
+		return nil
+	}
 }
 
 func (r *Runner) applyRetention(ctx context.Context, policy RetentionPolicy, repoURL string, env []string) error {

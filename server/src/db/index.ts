@@ -88,6 +88,8 @@ export async function initDb(): Promise<void> {
       post_script TEXT,
       exclude_patterns TEXT DEFAULT '[]',
       enabled INTEGER NOT NULL DEFAULT 1,
+      worm_enabled INTEGER NOT NULL DEFAULT 0,
+      worm_retention_days INTEGER NOT NULL DEFAULT 0,
       max_retries INTEGER NOT NULL DEFAULT 3,
       retry_delay_seconds INTEGER NOT NULL DEFAULT 60,
       tags TEXT DEFAULT '[]',
@@ -192,6 +194,14 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
   `);
+
+  // Add WORM columns to backup_jobs for existing databases.
+  for (const [col, def] of [
+    ["worm_enabled", "INTEGER NOT NULL DEFAULT 0"],
+    ["worm_retention_days", "INTEGER NOT NULL DEFAULT 0"],
+  ] as [string, string][]) {
+    try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
+  }
 
   // Add webhook columns to notification_settings for existing databases.
   // SQLite does not support "ADD COLUMN IF NOT EXISTS", so we catch the error.

@@ -155,6 +155,8 @@ export interface Job {
   enabled: boolean;
   maxRetries: number;
   retryDelaySeconds: number;
+  wormEnabled: boolean;
+  wormRetentionDays: number;
   createdAt: string;
   updatedAt: string;
 }

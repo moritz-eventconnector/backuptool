@@ -26,16 +26,18 @@ import (
 
 // Job represents a backup job received from the server.
 type Job struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	SourcePaths     []string        `json:"sourcePaths"`
-	DestinationIds  []string        `json:"destinationIds"`
-	Schedule        string          `json:"schedule"`
-	Retention       RetentionPolicy `json:"retention"`
-	PreScript       string          `json:"preScript"`
-	PostScript      string          `json:"postScript"`
-	ExcludePatterns []string        `json:"excludePatterns"`
-	MaxRetries      int             `json:"maxRetries"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	SourcePaths       []string        `json:"sourcePaths"`
+	DestinationIds    []string        `json:"destinationIds"`
+	Schedule          string          `json:"schedule"`
+	Retention         RetentionPolicy `json:"retention"`
+	PreScript         string          `json:"preScript"`
+	PostScript        string          `json:"postScript"`
+	ExcludePatterns   []string        `json:"excludePatterns"`
+	MaxRetries        int             `json:"maxRetries"`
+	WormEnabled       bool            `json:"wormEnabled"`
+	WormRetentionDays int             `json:"wormRetentionDays"`
 }
 
 // RetentionPolicy controls how many snapshots are retained.

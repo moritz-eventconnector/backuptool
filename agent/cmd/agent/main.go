@@ -301,6 +301,8 @@ func runBackup(ctx context.Context, conn *websocket.Conn, runner *backup.Runner,
 		ExcludePatterns:   job.ExcludePatterns,
 		MaxRetries:        job.MaxRetries,
 		RetryDelaySeconds: job.RetryDelaySeconds,
+		WormEnabled:       job.WormEnabled,
+		WormRetentionDays: job.WormRetentionDays,
 	}
 	// Parse retention from map
 	if r, ok := job.Retention["keepLast"].(float64); ok {

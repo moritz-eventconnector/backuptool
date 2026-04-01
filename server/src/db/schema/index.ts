@@ -58,6 +58,9 @@ export const backupJobs = sqliteTable("backup_jobs", {
   postScript: text("post_script"),
   excludePatterns: text("exclude_patterns").default("[]"), // JSON array
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  // WORM — Write Once Read Many (immutable backups)
+  wormEnabled: integer("worm_enabled", { mode: "boolean" }).notNull().default(false),
+  wormRetentionDays: integer("worm_retention_days").notNull().default(0), // 0 = no lock
   maxRetries: integer("max_retries").notNull().default(3),
   retryDelaySeconds: integer("retry_delay_seconds").notNull().default(60),
   tags: text("tags").default("[]"),

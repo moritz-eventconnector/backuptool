@@ -83,20 +83,22 @@ type RegistrationResponse struct {
 
 // JobConfig is a job with decrypted destination configs and restic password.
 type JobConfig struct {
-	ID               string                   `json:"id"`
-	Name             string                   `json:"name"`
-	SourcePaths      []string                 `json:"sourcePaths"`
-	DestinationIDs   []string                 `json:"destinationIds"`
-	Schedule         string                   `json:"schedule"`
-	Retention        map[string]interface{}   `json:"retention"`
-	PreScript        string                   `json:"preScript"`
-	PostScript       string                   `json:"postScript"`
-	ExcludePatterns  []string                 `json:"excludePatterns"`
-	MaxRetries       int                      `json:"maxRetries"`
-	RetryDelaySeconds int                     `json:"retryDelaySeconds"`
-	Enabled          bool                     `json:"enabled"`
-	Destinations     []DestinationConfig      `json:"destinations"`
-	ResticPassword   string                   `json:"resticPassword"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	SourcePaths       []string               `json:"sourcePaths"`
+	DestinationIDs    []string               `json:"destinationIds"`
+	Schedule          string                 `json:"schedule"`
+	Retention         map[string]interface{} `json:"retention"`
+	PreScript         string                 `json:"preScript"`
+	PostScript        string                 `json:"postScript"`
+	ExcludePatterns   []string               `json:"excludePatterns"`
+	MaxRetries        int                    `json:"maxRetries"`
+	RetryDelaySeconds int                    `json:"retryDelaySeconds"`
+	Enabled           bool                   `json:"enabled"`
+	Destinations      []DestinationConfig    `json:"destinations"`
+	ResticPassword    string                 `json:"resticPassword"`
+	WormEnabled       bool                   `json:"wormEnabled"`
+	WormRetentionDays int                    `json:"wormRetentionDays"`
 }
 
 // DestinationConfig is a decrypted destination config from the server.
