@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "backuptool-k8s-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "backuptool-k8s-agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "backuptool-k8s-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "backuptool-k8s-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "backuptool-k8s-agent.serviceAccountName" . }}
+
+      containers:
+        - name: k8s-agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          env:
+            # Server credentials from the Secret.
+            - name: SERVER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "backuptool-k8s-agent.fullname" . }}-credentials
+                  key: SERVER_URL
+            - name: AGENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "backuptool-k8s-agent.fullname" . }}-credentials
+                  key: AGENT_ID
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "backuptool-k8s-agent.fullname" . }}-credentials
+                  key: AGENT_TOKEN
+
+            # Agent behaviour.
+            - name: RESTIC_BIN
+              value: {{ .Values.restic.bin | quote }}
+            - name: DATA_DIR
+              value: {{ .Values.dataDir | quote }}
+            {{- if .Values.namespace }}
+            - name: BACKUP_NAMESPACE
+              value: {{ .Values.namespace | quote }}
+            {{- end }}
+
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.dataDir }}
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      volumes:
+        - name: data
+          emptyDir: {}
+          # Replace emptyDir with a PVC for persistent cert storage across
+          # pod restarts:
+          #
+          # persistentVolumeClaim:
+          #   claimName: backuptool-agent-data
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,66 @@
+# Default values for backuptool-k8s-agent.
+
+image:
+  repository: ghcr.io/backuptool/k8s-agent
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# BackupTool server connection details.
+server:
+  url: ""                 # required — e.g. https://backup.example.com
+  agentId: ""             # required — agent ID created on the server
+  registrationToken: ""   # required on first boot; cleared after registration
+
+# Restrict backup to a single namespace. Leave empty to back up all namespaces.
+namespace: ""
+
+restic:
+  bin: "restic"
+
+# Directory inside the pod used to persist mTLS certs between restarts.
+# Should be backed by a PersistentVolumeClaim or a hostPath volume.
+dataDir: /data/backuptool
+
+rbac:
+  # Create ClusterRole and ClusterRoleBinding for the ServiceAccount.
+  create: true
+
+serviceAccount:
+  # Create a dedicated ServiceAccount for the agent.
+  create: true
+  # Annotations to add to the ServiceAccount (e.g. for IRSA / Workload Identity).
+  annotations: {}
+  # Override the ServiceAccount name. Defaults to the chart fullname.
+  name: ""
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Additional environment variables injected into the agent container.
+extraEnv: []
+# - name: RESTIC_CACHE_DIR
+#   value: /data/backuptool/cache
+
+# Node selector, tolerations and affinity for the agent pod.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Pod-level security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL

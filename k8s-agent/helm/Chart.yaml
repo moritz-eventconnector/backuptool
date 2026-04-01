@@ -1,0 +1,6 @@
+apiVersion: v2
+name: backuptool-k8s-agent
+description: BackupTool Kubernetes Agent
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

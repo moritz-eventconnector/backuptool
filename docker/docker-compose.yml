@@ -1,0 +1,105 @@
+version: "3.9"
+
+# =============================================================================
+# backuptool — docker-compose
+#
+# Quick start:
+#   1. cp .env.example .env   # fill in MASTER_SECRET and COOKIE_SECRET
+#   2. docker compose up -d
+#
+# The `agent` service is provided for local development / testing only.
+# In production, deploy the agent separately on each managed host.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # server — REST API + web UI
+  # ---------------------------------------------------------------------------
+  server:
+    build:
+      context: ..            # repo root (pnpm-workspace.yaml lives there)
+      dockerfile: docker/Dockerfile.server
+    image: backuptool/server:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # Runtime mode — always production inside Docker.
+      NODE_ENV: production
+
+      # Port the HTTP server binds to inside the container.
+      PORT: "3000"
+
+      # Directory where the server stores its database and file uploads.
+      # Must match the volume mount below.
+      DATA_DIR: /data
+
+      # REQUIRED — random secret used to derive encryption keys.
+      # Generate with: openssl rand -hex 32
+      MASTER_SECRET: "${MASTER_SECRET}"
+
+      # CORS allowed origin for the web UI.
+      # Set to the public URL of your installation (e.g. https://backup.example.com).
+      CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:3000}"
+
+      # REQUIRED — secret used to sign session cookies.
+      # Generate with: openssl rand -hex 32
+      COOKIE_SECRET: "${COOKIE_SECRET}"
+
+      # OPTIONAL — Ed25519 public key (PEM) used to validate license tokens.
+      # Leave empty to run in unlicensed / community mode.
+      LICENSE_PUBLIC_KEY: "${LICENSE_PUBLIC_KEY:-}"
+
+      # OPTIONAL — SMTP settings for email notifications.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+
+    volumes:
+      # Persistent application data (SQLite database, uploaded artefacts, etc.)
+      - backuptool-data:/data
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # agent — local testing only
+  #
+  # In production each managed host runs its own agent binary or container.
+  # This service is kept here so the full stack can be exercised locally
+  # with `docker compose --profile dev up`.
+  # ---------------------------------------------------------------------------
+  agent:
+    profiles: ["dev"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    image: backuptool/agent:latest
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      # Full URL of the backuptool server this agent should register with.
+      SERVER_URL: "${AGENT_SERVER_URL:-http://server:3000}"
+
+      # Pre-shared token used by the agent to authenticate to the server.
+      # Must match a token configured in the server.
+      AGENT_TOKEN: "${AGENT_TOKEN:-}"
+
+      # Human-readable name shown in the UI for this agent.
+      AGENT_NAME: "${AGENT_NAME:-local-agent}"
+
+# =============================================================================
+# Named volumes
+# =============================================================================
+volumes:
+  backuptool-data:
+    driver: local

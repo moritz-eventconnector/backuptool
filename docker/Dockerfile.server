@@ -1,0 +1,74 @@
+# =============================================================================
+# Stage 1: Build the web UI (Vite/React)
+# =============================================================================
+FROM node:22-alpine AS web-builder
+
+WORKDIR /app
+
+# Copy workspace manifests first for better layer caching.
+COPY pnpm-workspace.yaml package.json ./
+COPY web/package.json ./web/
+
+# Enable pnpm via corepack and install dependencies.
+RUN corepack enable && pnpm install --frozen-lockfile
+
+# Copy source and build.
+COPY web ./web
+RUN pnpm --filter web build
+
+# =============================================================================
+# Stage 2: Build the Node.js server (TypeScript → JavaScript)
+# =============================================================================
+FROM node:22-alpine AS server-builder
+
+WORKDIR /app
+
+# Copy workspace manifests first for better layer caching.
+COPY pnpm-workspace.yaml package.json ./
+COPY server/package.json ./server/
+
+# Enable pnpm via corepack and install dependencies (includes devDeps for tsc).
+RUN corepack enable && pnpm install --frozen-lockfile
+
+# Copy source and compile.
+COPY server ./server
+RUN pnpm --filter server build
+
+# =============================================================================
+# Stage 3: Production image
+# =============================================================================
+FROM node:22-alpine
+
+LABEL org.opencontainers.image.title="backuptool-server" \
+      org.opencontainers.image.description="backuptool server + web UI" \
+      org.opencontainers.image.source="https://github.com/backuptool/backuptool"
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Install runtime backup utilities.
+RUN apk add --no-cache restic rclone
+
+# Copy the pre-built web UI static assets.
+COPY --from=web-builder /app/web/dist ./web/dist
+
+# Copy the compiled server, its production node_modules, and package.json
+# (package.json is needed by some runtime resolution paths).
+COPY --from=server-builder /app/server/dist         ./server/dist
+COPY --from=server-builder /app/server/node_modules ./server/node_modules
+COPY --from=server-builder /app/server/package.json ./server/
+
+WORKDIR /app/server
+
+# Expose the HTTP port.
+EXPOSE 3000
+
+# Persist application data (SQLite database, uploaded files, etc.) on a volume.
+VOLUME ["/data"]
+
+# Run as non-root for least-privilege operation.
+RUN addgroup -S backuptool && adduser -S -G backuptool backuptool
+USER backuptool
+
+CMD ["node", "dist/index.js"]

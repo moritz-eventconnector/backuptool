@@ -1,0 +1,47 @@
+# Node
+node_modules/
+dist/
+.env
+.env.local
+*.log
+
+# Go
+agent/bin/
+k8s-agent/bin/
+licenser/bin/
+cli/bin/
+*.exe
+*.test
+
+# Build output
+build/
+out/
+binaries/
+
+# Data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Keys (never commit private keys)
+*.pem
+*.key
+keys/private*.pem
+keys/private*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Turbo
+.turbo/
+
+# pnpm
+.pnpm-store/

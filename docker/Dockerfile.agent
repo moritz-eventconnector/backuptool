@@ -1,0 +1,39 @@
+# =============================================================================
+# Stage 1: Build the Go agent binary
+# =============================================================================
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /app
+
+# Copy go.mod / go.sum first so Docker can cache the module download layer
+# independently of source changes.
+COPY agent/go.mod agent/go.sum ./agent/
+
+RUN cd agent && go mod download
+
+# Copy the full agent source and compile a statically-linked, stripped binary.
+COPY agent ./agent
+RUN cd agent && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o /agent ./cmd/agent
+
+# =============================================================================
+# Stage 2: Minimal production image
+# =============================================================================
+FROM alpine:3.21
+
+LABEL org.opencontainers.image.title="backuptool-agent" \
+      org.opencontainers.image.description="backuptool agent — runs on managed hosts" \
+      org.opencontainers.image.source="https://github.com/backuptool/backuptool"
+
+# Install backup utilities and CA certificates (for TLS to the server).
+RUN apk add --no-cache restic rclone ca-certificates
+
+# Copy the compiled agent binary.
+COPY --from=builder /agent /usr/local/bin/agent
+
+# Run as an unprivileged user.
+RUN adduser -D -u 1000 backuptool
+USER backuptool
+
+ENTRYPOINT ["/usr/local/bin/agent"]
