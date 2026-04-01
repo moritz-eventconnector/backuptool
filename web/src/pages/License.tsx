@@ -16,7 +16,7 @@ export default function LicensePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const uploadMut = useMutation({
+  const uploadMut = useMutation<{ message: string }, Error, void>({
     mutationFn: () => api.uploadLicense(licenseText.trim()),
     onSuccess: (data: { message: string }) => {
       setSuccess(data.message ?? "License activated!");

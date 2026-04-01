@@ -92,7 +92,7 @@ export const api = {
   // License
   getLicense: () => request<LicenseInfo>("/license"),
   uploadLicense: (rawJwt: string) =>
-    request("/license", { method: "POST", body: JSON.stringify({ license: rawJwt }) }),
+    request<{ message: string }>("/license", { method: "POST", body: JSON.stringify({ license: rawJwt }) }),
   deleteLicense: () => request("/license", { method: "DELETE" }),
 
   // Settings — Notifications

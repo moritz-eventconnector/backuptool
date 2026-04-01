@@ -464,7 +464,13 @@ func syncJobs(ctx context.Context, srv *client.ServerClient, scheduler *cron.Cro
 		}
 		j := job // capture
 		scheduler.AddFunc(j.Schedule, func() {
-			snapshotID := fmt.Sprintf("auto-%d", time.Now().UnixMilli())
+			snapshotID := fmt.Sprintf("sched-%d", time.Now().UnixMilli())
+			// Notify server to create the snapshot record before running
+			conn.WriteJSON(map[string]interface{}{
+				"type":       "snapshot_start",
+				"snapshotId": snapshotID,
+				"jobId":      j.ID,
+			})
 			runBackup(ctx, conn, runner, &j, snapshotID)
 		})
 		log.Printf("Scheduled job %s: %s", j.Name, j.Schedule)

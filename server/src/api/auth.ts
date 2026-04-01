@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
@@ -24,7 +24,7 @@ const registerSchema = z.object({
   password: z.string().min(12, "Password must be at least 12 characters"),
 });
 
-function setTokenCookies(res: Parameters<typeof authRouter.get>[1], accessToken: string, refreshToken: string) {
+function setTokenCookies(res: Response, accessToken: string, refreshToken: string) {
   const isProduction = config.env === "production";
   res.cookie("access_token", accessToken, {
     httpOnly: true,

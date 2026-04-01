@@ -2,11 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
-import { backupJobs, agents, snapshots } from "../db/schema/index.js";
+import { backupJobs, agents, snapshots, notificationSettings } from "../db/schema/index.js";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { sendToAgent } from "../websocket/index.js";
-import { encrypt, randomToken } from "../crypto/encryption.js";
+import { encrypt, randomToken, decrypt } from "../crypto/encryption.js";
+import { sendBackupNotification } from "../notifications/email.js";
+import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
+import { logger } from "../logger.js";
 
 export const jobsRouter = Router();
 
@@ -189,6 +192,39 @@ jobsRouter.post("/:id/run", requireAuth, requireRole("admin", "operator"), (req,
 
   // Mark agent as busy
   db.update(agents).set({ status: "busy" }).where(eq(agents.id, job.agentId)).run();
+
+  // Fire "on start" notifications (fire-and-forget)
+  try {
+    const [notifRow] = db.select().from(notificationSettings).all();
+    const [agentRow] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId)).all();
+    const jobName = job.name;
+    const agentName = agentRow?.name ?? job.agentId;
+    const startedAt = new Date().toISOString();
+
+    if (notifRow?.emailEnabled && notifRow.notifyOnStart) {
+      const recipients: string[] = JSON.parse(notifRow.emailRecipients ?? "[]");
+      if (recipients.length > 0) {
+        let smtpPass: string | undefined;
+        if (notifRow.smtpPassEncrypted) {
+          try { smtpPass = decrypt(notifRow.smtpPassEncrypted); } catch { /* ignore */ }
+        }
+        sendBackupNotification(recipients, { jobName, agentName, status: "running", startedAt, snapshotId }, {
+          smtpHost: notifRow.smtpHost, smtpPort: notifRow.smtpPort,
+          smtpUser: notifRow.smtpUser, smtpFrom: notifRow.smtpFrom, smtpPass,
+        }).catch((err) => logger.error({ err }, "Start email notification failed"));
+      }
+    }
+
+    if (notifRow?.webhookEnabled && notifRow.webhookUrl && notifRow.webhookOnStart) {
+      sendWebhookNotification(
+        notifRow.webhookUrl,
+        (notifRow.webhookType ?? "generic") as WebhookType,
+        { jobName, agentName, status: "running", startedAt, snapshotId },
+      ).catch((err) => logger.error({ err }, "Start webhook notification failed"));
+    }
+  } catch (err) {
+    logger.error({ err }, "Error preparing start notifications");
+  }
 
   res.json({ snapshotId, message: "Backup triggered" });
 });

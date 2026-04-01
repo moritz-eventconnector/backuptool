@@ -101,6 +101,24 @@ export function initWebSocket(server: Server): WebSocketServer {
       if (!isUi) {
         const agentId = socketToAgent.get(ws)!;
 
+        if (msg.type === "snapshot_start") {
+          // Agent-initiated backup (from its own cron schedule) — create the snapshot record
+          const db = getDb();
+          const snapshotId = msg.snapshotId as string;
+          const jobId = msg.jobId as string;
+          if (snapshotId && jobId) {
+            db.insert(snapshots).values({
+              id: snapshotId,
+              jobId,
+              agentId,
+              status: "running",
+            }).run();
+            db.update(agents).set({ status: "busy" }).where(eq(agents.id, agentId)).run();
+            broadcastToUi({ type: "snapshot_start", agentId, snapshotId, jobId });
+          }
+          return;
+        }
+
         if (msg.type === "discovered_services") {
           const db = getDb();
           db.update(agents)
