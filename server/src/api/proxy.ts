@@ -50,20 +50,35 @@ function buildCaddyfile(opts: {
     lines.push("");
   }
 
-  // Determine site address
+  // Determine site address + TLS
+  // Always serve HTTPS — "off" uses Caddy's internal self-signed cert so cookies
+  // and browser security work out of the box without a real domain.
   let siteAddr: string;
-  if (!domain) {
-    siteAddr = ":80";
-  } else if (sslMode === "off") {
-    siteAddr = `http://${domain}`;
+  if (!domain || sslMode === "off") {
+    siteAddr = ":443";
   } else {
-    siteAddr = domain; // Caddy auto-TLS or custom cert
+    siteAddr = domain; // letsencrypt or custom — Caddy uses the domain for ACME/SNI
+  }
+
+  // HTTP → HTTPS redirect block (only needed when listening on a named domain port 443)
+  if (domain && sslMode !== "off") {
+    lines.push(`http://${domain} {`);
+    lines.push(`  redir https://${domain}{uri} 308`);
+    lines.push("}");
+    lines.push("");
+  } else if (!domain || sslMode === "off") {
+    lines.push(":80 {");
+    lines.push("  redir https://{host}{uri} 308");
+    lines.push("}");
+    lines.push("");
   }
 
   lines.push(`${siteAddr} {`);
 
   // TLS directive
-  if (sslMode === "custom") {
+  if (sslMode === "off" || !domain) {
+    lines.push("  tls internal");
+  } else if (sslMode === "custom") {
     lines.push("  tls /data/caddy/cert.pem /data/caddy/key.pem");
   }
   // letsencrypt: Caddy handles TLS automatically for named domains — no directive needed
