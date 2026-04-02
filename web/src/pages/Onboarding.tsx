@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Check, ChevronRight, Server, Mail, Globe, Lock, SkipForward,
 } from "lucide-react";
@@ -15,18 +13,15 @@ const STEPS = [
   { id: "done", label: "Done" },
 ];
 
-export default function Onboarding() {
+export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState(0);
-  const navigate = useNavigate();
-  const qc = useQueryClient();
 
   const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
   const skip = () => next();
 
   const finish = async () => {
     await api.saveAppConfig({ setupCompleted: true });
-    qc.invalidateQueries({ queryKey: ["setup-status"] });
-    navigate("/");
+    onComplete();
   };
 
   return (
