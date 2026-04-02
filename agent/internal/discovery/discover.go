@@ -324,7 +324,363 @@ mysqldump -u"$USER" -p"$PASS" "$DB" > %s/wp-database-dump.sql 2>/dev/null || tru
 		})
 	}
 
-	// ── Mail servers ─────────────────────────────────────────────────────────
+	// ── DNS servers ──────────────────────────────────────────────────────────
+
+	// BIND9 / named
+	if hasProc(procs, "named") || hasBin("named") || dirExists("/etc/bind") {
+		services = append(services, DiscoveredService{
+			Name:        "BIND9 (DNS)",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/bind", "/var/lib/bind", "/var/cache/bind", "/etc/named.conf", "/var/named"),
+			Note:        "Zone files, DNSSEC keys and named.conf. Critical for DNS continuity.",
+			Priority:    "critical",
+		})
+	}
+
+	// PowerDNS
+	if hasProc(procs, "pdns_server") || hasBin("pdns_server") || dirExists("/etc/powerdns") {
+		services = append(services, DiscoveredService{
+			Name:        "PowerDNS",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/powerdns", "/var/lib/pdns"),
+			Priority:    "critical",
+		})
+	}
+
+	// Unbound
+	if hasProc(procs, "unbound") || dirExists("/etc/unbound") {
+		services = append(services, DiscoveredService{
+			Name:        "Unbound (DNS resolver)",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/unbound"),
+			Priority:    "recommended",
+		})
+	}
+
+	// dnsmasq
+	if hasProc(procs, "dnsmasq") || dirExists("/etc/dnsmasq.d") {
+		services = append(services, DiscoveredService{
+			Name:        "dnsmasq",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/dnsmasq.conf", "/etc/dnsmasq.d"),
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Web servers ───────────────────────────────────────────────────────────
+
+	// Nginx
+	if hasProc(procs, "nginx") || hasBin("nginx") || dirExists("/etc/nginx") {
+		services = append(services, DiscoveredService{
+			Name:        "Nginx",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/nginx"),
+			Priority:    "critical",
+		})
+	}
+
+	// Apache
+	if hasProc(procs, "apache2") || hasProc(procs, "httpd") || dirExists("/etc/apache2") || dirExists("/etc/httpd") {
+		services = append(services, DiscoveredService{
+			Name:        "Apache",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/apache2", "/etc/httpd"),
+			Priority:    "critical",
+		})
+	}
+
+	// Caddy
+	if hasProc(procs, "caddy") || hasBin("caddy") || dirExists("/etc/caddy") {
+		services = append(services, DiscoveredService{
+			Name:        "Caddy",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/caddy", "/var/lib/caddy", "/usr/local/etc/caddy"),
+			Priority:    "recommended",
+		})
+	}
+
+	// HAProxy
+	if hasProc(procs, "haproxy") || dirExists("/etc/haproxy") {
+		services = append(services, DiscoveredService{
+			Name:        "HAProxy",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/haproxy"),
+			Priority:    "critical",
+		})
+	}
+
+	// Traefik
+	if hasProc(procs, "traefik") || dirExists("/etc/traefik") {
+		services = append(services, DiscoveredService{
+			Name:        "Traefik",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/traefik", "/var/lib/traefik"),
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Server management panels ──────────────────────────────────────────────
+
+	// Webmin
+	if hasProc(procs, "miniserv.pl") || hasBin("webmin") || dirExists("/etc/webmin") {
+		services = append(services, DiscoveredService{
+			Name:        "Webmin",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/webmin", "/var/webmin"),
+			Note:        "Webmin configuration, modules and user data.",
+			Priority:    "critical",
+		})
+	}
+
+	// cPanel / WHM
+	if dirExists("/usr/local/cpanel") || dirExists("/var/cpanel") {
+		services = append(services, DiscoveredService{
+			Name:        "cPanel / WHM",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/cpanel", "/etc/cpanel", "/usr/local/cpanel/logs"),
+			Note:        "Use cPanel's built-in backup for full account backups.",
+			Priority:    "critical",
+		})
+	}
+
+	// Plesk
+	if dirExists("/opt/psa") || dirExists("/usr/local/psa") {
+		services = append(services, DiscoveredService{
+			Name:        "Plesk",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/vhosts", "/opt/psa/var", "/etc/sw/keys"),
+			Priority:    "critical",
+		})
+	}
+
+	// ISPConfig
+	if dirExists("/usr/local/ispconfig") {
+		services = append(services, DiscoveredService{
+			Name:        "ISPConfig",
+			Type:        "app",
+			SourcePaths: existingPaths("/usr/local/ispconfig", "/etc/ispconfig"),
+			Priority:    "critical",
+		})
+	}
+
+	// HestiaCP / VestaCP
+	if dirExists("/usr/local/hestia") || dirExists("/usr/local/vesta") {
+		hPath := firstExisting("/usr/local/hestia", "/usr/local/vesta")
+		services = append(services, DiscoveredService{
+			Name:        "HestiaCP / VestaCP",
+			Type:        "app",
+			SourcePaths: existingPaths(hPath+"/data", hPath+"/conf", "/home"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Messaging / Queue ─────────────────────────────────────────────────────
+
+	// RabbitMQ
+	if hasProc(procs, "beam.smp") || hasBin("rabbitmqctl") || dirExists("/var/lib/rabbitmq") {
+		services = append(services, DiscoveredService{
+			Name:        "RabbitMQ",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/rabbitmq", "/etc/rabbitmq"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Search / Datastore ────────────────────────────────────────────────────
+
+	// Elasticsearch
+	if hasProc(procs, "java") && dirExists("/var/lib/elasticsearch") {
+		services = append(services, DiscoveredService{
+			Name:        "Elasticsearch",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/elasticsearch", "/etc/elasticsearch"),
+			Note:        "Stop Elasticsearch or use snapshot API for consistent backups.",
+			Priority:    "critical",
+		})
+	}
+
+	// OpenSearch
+	if dirExists("/var/lib/opensearch") || dirExists("/etc/opensearch") {
+		services = append(services, DiscoveredService{
+			Name:        "OpenSearch",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/opensearch", "/etc/opensearch"),
+			Priority:    "critical",
+		})
+	}
+
+	// CouchDB
+	if hasProc(procs, "beam") || hasBin("couchdb") || dirExists("/var/lib/couchdb") {
+		services = append(services, DiscoveredService{
+			Name:        "CouchDB",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/couchdb", "/etc/couchdb"),
+			Priority:    "critical",
+		})
+	}
+
+	// Cassandra
+	if hasProc(procs, "java") && dirExists("/var/lib/cassandra") {
+		services = append(services, DiscoveredService{
+			Name:        "Apache Cassandra",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/cassandra", "/etc/cassandra"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Monitoring & Observability ────────────────────────────────────────────
+
+	// Prometheus
+	if hasProc(procs, "prometheus") || dirExists("/var/lib/prometheus") {
+		services = append(services, DiscoveredService{
+			Name:        "Prometheus",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/prometheus", "/etc/prometheus"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Victoria Metrics
+	if hasProc(procs, "victoria-metrics") || dirExists("/var/lib/victoria-metrics-data") {
+		services = append(services, DiscoveredService{
+			Name:        "VictoriaMetrics",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/victoria-metrics-data", "/etc/victoria-metrics"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Loki
+	if hasProc(procs, "loki") || dirExists("/var/lib/loki") {
+		services = append(services, DiscoveredService{
+			Name:        "Grafana Loki",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/loki", "/etc/loki"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Zabbix
+	if hasProc(procs, "zabbix_server") || dirExists("/etc/zabbix") {
+		services = append(services, DiscoveredService{
+			Name:        "Zabbix",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/zabbix", "/var/lib/zabbix", "/usr/share/zabbix"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Nagios / Icinga
+	if dirExists("/usr/local/nagios") || dirExists("/etc/nagios") || dirExists("/etc/icinga") {
+		services = append(services, DiscoveredService{
+			Name:        "Nagios / Icinga",
+			Type:        "app",
+			SourcePaths: existingPaths("/usr/local/nagios/etc", "/etc/nagios", "/etc/icinga", "/var/lib/nagios", "/var/lib/icinga"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Uptime Kuma
+	if dirExists("/app/data") && (hasBin("node") || hasProc(procs, "node")) {
+		if _, err := os.Stat("/app/data/kuma.db"); err == nil {
+			services = append(services, DiscoveredService{
+				Name:        "Uptime Kuma",
+				Type:        "app",
+				SourcePaths: []string{"/app/data"},
+				Priority:    "recommended",
+			})
+		}
+	}
+	if d := firstExisting("/opt/uptime-kuma", "/home/node/.uptime-kuma"); d != "" {
+		services = append(services, DiscoveredService{
+			Name:        "Uptime Kuma",
+			Type:        "app",
+			SourcePaths: []string{d},
+			Priority:    "recommended",
+		})
+	}
+
+	// ── CI/CD ─────────────────────────────────────────────────────────────────
+
+	// Jenkins
+	if hasProc(procs, "java") && dirExists("/var/lib/jenkins") {
+		services = append(services, DiscoveredService{
+			Name:        "Jenkins",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/jenkins", "/etc/default/jenkins"),
+			Note:        "Includes jobs, build history, credentials and plugins.",
+			Priority:    "critical",
+		})
+	}
+
+	// GitLab Runner
+	if dirExists("/etc/gitlab-runner") || dirExists("/var/lib/gitlab-runner") {
+		services = append(services, DiscoveredService{
+			Name:        "GitLab Runner",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/gitlab-runner", "/var/lib/gitlab-runner"),
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Communication ─────────────────────────────────────────────────────────
+
+	// Matrix / Synapse
+	if hasProc(procs, "synapse") || dirExists("/var/lib/matrix-synapse") || dirExists("/etc/matrix-synapse") {
+		services = append(services, DiscoveredService{
+			Name:        "Matrix (Synapse)",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/matrix-synapse", "/etc/matrix-synapse"),
+			PreScript: `#!/usr/bin/env bash
+# Dump Synapse PostgreSQL database
+pg_dump -U synapse synapse > /tmp/backuptool-synapse-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-synapse-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// ejabberd
+	if hasProc(procs, "ejabberd") || dirExists("/var/lib/ejabberd") {
+		services = append(services, DiscoveredService{
+			Name:        "ejabberd (XMPP)",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/ejabberd", "/etc/ejabberd"),
+			Priority:    "critical",
+		})
+	}
+
+	// Prosody
+	if hasProc(procs, "prosody") || dirExists("/var/lib/prosody") {
+		services = append(services, DiscoveredService{
+			Name:        "Prosody (XMPP)",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/prosody", "/etc/prosody"),
+			Priority:    "critical",
+		})
+	}
+
+	// Mumble / Murmur
+	if hasProc(procs, "murmurd") || dirExists("/var/lib/mumble-server") {
+		services = append(services, DiscoveredService{
+			Name:        "Mumble (Murmur)",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/mumble-server", "/etc/mumble-server.ini"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Rocket.Chat
+	if dirExists("/opt/Rocket.Chat") || dirExists("/var/lib/rocketchat") {
+		services = append(services, DiscoveredService{
+			Name:        "Rocket.Chat",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/Rocket.Chat/uploads", "/var/lib/rocketchat"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Mail ─────────────────────────────────────────────────────────────────
 
 	if hasProc(procs, "dovecot") || hasProc(procs, "postfix") || dirExists("/var/mail") || dirExists("/var/spool/mail") {
 		paths := existingPaths("/var/mail", "/var/spool/mail", "/home", "/etc/postfix", "/etc/dovecot")
@@ -333,6 +689,369 @@ mysqldump -u"$USER" -p"$PASS" "$DB" > %s/wp-database-dump.sql 2>/dev/null || tru
 			Type:        "mail",
 			SourcePaths: paths,
 			Priority:    "critical",
+		})
+	}
+
+	// Exim
+	if hasProc(procs, "exim") || hasBin("exim") || dirExists("/etc/exim4") {
+		services = append(services, DiscoveredService{
+			Name:        "Exim",
+			Type:        "mail",
+			SourcePaths: existingPaths("/etc/exim4", "/var/spool/exim4"),
+			Priority:    "critical",
+		})
+	}
+
+	// Mailcow
+	if dirExists("/opt/mailcow-dockerized") {
+		services = append(services, DiscoveredService{
+			Name:        "Mailcow",
+			Type:        "mail",
+			SourcePaths: existingPaths("/opt/mailcow-dockerized"),
+			Note:        "Includes docker-compose.yml, .env and all mail data.",
+			Priority:    "critical",
+		})
+	}
+
+	// Roundcube
+	if dirExists("/var/lib/roundcube") || dirExists("/etc/roundcube") {
+		services = append(services, DiscoveredService{
+			Name:        "Roundcube Webmail",
+			Type:        "mail",
+			SourcePaths: existingPaths("/var/lib/roundcube", "/etc/roundcube"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Rspamd
+	if hasProc(procs, "rspamd") || dirExists("/etc/rspamd") {
+		services = append(services, DiscoveredService{
+			Name:        "Rspamd (spam filter)",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/rspamd", "/var/lib/rspamd"),
+			Priority:    "recommended",
+		})
+	}
+
+	// SpamAssassin
+	if hasBin("spamassassin") || dirExists("/etc/spamassassin") {
+		services = append(services, DiscoveredService{
+			Name:        "SpamAssassin",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/spamassassin", "/var/lib/spamassassin"),
+			Priority:    "optional",
+		})
+	}
+
+	// ── VPN / Networking ──────────────────────────────────────────────────────
+
+	// OpenVPN
+	if hasProc(procs, "openvpn") || dirExists("/etc/openvpn") {
+		services = append(services, DiscoveredService{
+			Name:        "OpenVPN",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/openvpn"),
+			Note:        "Includes PKI keys, CA and client configs. Keep private.",
+			Priority:    "critical",
+		})
+	}
+
+	// WireGuard
+	if hasProc(procs, "wireguard") || dirExists("/etc/wireguard") {
+		services = append(services, DiscoveredService{
+			Name:        "WireGuard",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/wireguard"),
+			Note:        "Private keys and peer configs.",
+			Priority:    "critical",
+		})
+	}
+
+	// StrongSwan / IPsec
+	if hasProc(procs, "charon") || dirExists("/etc/ipsec.d") || dirExists("/etc/strongswan") {
+		services = append(services, DiscoveredService{
+			Name:        "StrongSwan / IPsec",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/ipsec.d", "/etc/strongswan", "/etc/ipsec.conf", "/etc/ipsec.secrets"),
+			Priority:    "critical",
+		})
+	}
+
+	// ZeroTier
+	if hasProc(procs, "zerotier-one") || dirExists("/var/lib/zerotier-one") {
+		services = append(services, DiscoveredService{
+			Name:        "ZeroTier",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/zerotier-one"),
+			Note:        "Node identity and network configs.",
+			Priority:    "critical",
+		})
+	}
+
+	// Squid proxy
+	if hasProc(procs, "squid") || dirExists("/etc/squid") {
+		services = append(services, DiscoveredService{
+			Name:        "Squid Proxy",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/squid"),
+			Priority:    "optional",
+		})
+	}
+
+	// ── Security / Identity ───────────────────────────────────────────────────
+
+	// Fail2ban
+	if hasProc(procs, "fail2ban-server") || dirExists("/etc/fail2ban") {
+		services = append(services, DiscoveredService{
+			Name:        "Fail2ban",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/fail2ban", "/var/lib/fail2ban"),
+			Priority:    "recommended",
+		})
+	}
+
+	// CrowdSec
+	if hasProc(procs, "crowdsec") || dirExists("/etc/crowdsec") {
+		services = append(services, DiscoveredService{
+			Name:        "CrowdSec",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/crowdsec", "/var/lib/crowdsec"),
+			Priority:    "recommended",
+		})
+	}
+
+	// OpenLDAP
+	if hasProc(procs, "slapd") || dirExists("/var/lib/ldap") {
+		services = append(services, DiscoveredService{
+			Name:        "OpenLDAP",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/ldap", "/etc/ldap", "/etc/openldap"),
+			PreScript: `#!/usr/bin/env bash
+slapcat -n 1 > /tmp/backuptool-ldap.ldif 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-ldap.ldif`,
+			Priority:   "critical",
+		})
+	}
+
+	// HashiCorp Vault
+	if hasProc(procs, "vault") || dirExists("/etc/vault.d") {
+		services = append(services, DiscoveredService{
+			Name:        "HashiCorp Vault",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/vault.d", "/var/lib/vault", "/opt/vault"),
+			Note:        "Includes unsealed storage and config. Never back up unseal keys insecurely.",
+			Priority:    "critical",
+		})
+	}
+
+	// Authentik
+	if dirExists("/etc/authentik") || dirExists("/media/authentik") {
+		services = append(services, DiscoveredService{
+			Name:        "Authentik (SSO)",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/authentik", "/media/authentik"),
+			Priority:    "critical",
+		})
+	}
+
+	// Keycloak
+	if dirExists("/opt/keycloak") || hasProc(procs, "keycloak") {
+		services = append(services, DiscoveredService{
+			Name:        "Keycloak",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/keycloak/data", "/var/lib/keycloak"),
+			Priority:    "critical",
+		})
+	}
+
+	// FreeIPA
+	if dirExists("/etc/ipa") || dirExists("/var/lib/ipa") {
+		services = append(services, DiscoveredService{
+			Name:        "FreeIPA",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/ipa", "/var/lib/ipa"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── File Sharing / Storage ────────────────────────────────────────────────
+
+	// Samba
+	if hasProc(procs, "smbd") || dirExists("/etc/samba") {
+		services = append(services, DiscoveredService{
+			Name:        "Samba",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/samba"),
+			Priority:    "recommended",
+		})
+	}
+
+	// MinIO
+	if hasProc(procs, "minio") || dirExists("/var/lib/minio") || dirExists("/data/minio") {
+		mPath := firstExisting("/var/lib/minio", "/data/minio", "/mnt/data/minio")
+		services = append(services, DiscoveredService{
+			Name:        "MinIO",
+			Type:        "app",
+			SourcePaths: existingPaths(mPath, "/etc/minio"),
+			Priority:    "critical",
+		})
+	}
+
+	// Seafile
+	if dirExists("/opt/seafile") || dirExists("/var/seafile") {
+		services = append(services, DiscoveredService{
+			Name:        "Seafile",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/seafile", "/var/seafile"),
+			Priority:    "critical",
+		})
+	}
+
+	// Syncthing
+	if hasProc(procs, "syncthing") || dirExists("/var/lib/syncthing") {
+		services = append(services, DiscoveredService{
+			Name:        "Syncthing",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/syncthing"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Portainer
+	if dirExists("/data/portainer") {
+		services = append(services, DiscoveredService{
+			Name:        "Portainer",
+			Type:        "app",
+			SourcePaths: []string{"/data/portainer"},
+			Note:        "Portainer data volume with stacks, configs and users.",
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Media servers ─────────────────────────────────────────────────────────
+
+	// Plex
+	if hasProc(procs, "Plex Media Server") || dirExists("/var/lib/plexmediaserver") {
+		services = append(services, DiscoveredService{
+			Name:        "Plex Media Server",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/plexmediaserver/Library/Application Support/Plex Media Server"),
+			Note:        "Metadata, database and preferences. Media files are separate.",
+			Priority:    "recommended",
+		})
+	}
+
+	// Jellyfin
+	if hasProc(procs, "jellyfin") || dirExists("/var/lib/jellyfin") {
+		services = append(services, DiscoveredService{
+			Name:        "Jellyfin",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/jellyfin", "/etc/jellyfin"),
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Automation & Low-code ─────────────────────────────────────────────────
+
+	// n8n
+	if hasProc(procs, "n8n") || dirExists("/home/node/.n8n") {
+		n8nPath := firstExisting("/home/node/.n8n", "/var/lib/n8n", "/opt/n8n")
+		services = append(services, DiscoveredService{
+			Name:        "n8n",
+			Type:        "app",
+			SourcePaths: existingPaths(n8nPath),
+			Note:        "Workflows, credentials and settings.",
+			Priority:    "critical",
+		})
+	}
+
+	// Netbox
+	if dirExists("/opt/netbox") {
+		services = append(services, DiscoveredService{
+			Name:        "NetBox",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/netbox/netbox/media", "/opt/netbox/netbox/reports"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U netbox netbox > /tmp/backuptool-netbox-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-netbox-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Gotify
+	if hasProc(procs, "gotify") || dirExists("/var/lib/gotify") || dirExists("/app/data") {
+		gPath := firstExisting("/var/lib/gotify", "/app/data")
+		if gPath != "" {
+			services = append(services, DiscoveredService{
+				Name:        "Gotify",
+				Type:        "app",
+				SourcePaths: []string{gPath},
+				Priority:    "recommended",
+			})
+		}
+	}
+
+	// Plane (project management)
+	if dirExists("/opt/plane") {
+		services = append(services, DiscoveredService{
+			Name:        "Plane",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/plane"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Infrastructure tools ──────────────────────────────────────────────────
+
+	// Consul
+	if hasProc(procs, "consul") || dirExists("/var/lib/consul") {
+		services = append(services, DiscoveredService{
+			Name:        "Consul",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/consul", "/etc/consul.d"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Nomad
+	if hasProc(procs, "nomad") || dirExists("/var/lib/nomad") {
+		services = append(services, DiscoveredService{
+			Name:        "Nomad",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/nomad", "/etc/nomad.d"),
+			Priority:    "recommended",
+		})
+	}
+
+	// etcd
+	if hasProc(procs, "etcd") || dirExists("/var/lib/etcd") {
+		services = append(services, DiscoveredService{
+			Name:        "etcd",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/etcd"),
+			Note:        "etcd data directory. Use etcdctl snapshot for online backups.",
+			Priority:    "critical",
+		})
+	}
+
+	// Kubernetes
+	if dirExists("/etc/kubernetes") || dirExists("/var/lib/kubelet") {
+		services = append(services, DiscoveredService{
+			Name:        "Kubernetes",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/kubernetes", "/var/lib/kubelet"),
+			Note:        "Cluster configs and manifests. Consider also backing up etcd.",
+			Priority:    "critical",
+		})
+	}
+
+	// Ansible
+	if dirExists("/etc/ansible") {
+		services = append(services, DiscoveredService{
+			Name:        "Ansible",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/ansible"),
+			Priority:    "recommended",
 		})
 	}
 
