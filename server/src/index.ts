@@ -48,6 +48,7 @@ async function main() {
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:"],
           connectSrc: ["'self'", "ws:", "wss:"],
+          upgradeInsecureRequests: null, // Don't force HTTPS — app may run behind HTTP proxy
         },
       },
       crossOriginEmbedderPolicy: false,
