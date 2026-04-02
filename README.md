@@ -75,18 +75,22 @@ Open `docker/.env` and set at minimum:
 ```env
 # Required — generate with: openssl rand -hex 32
 MASTER_SECRET=change_me_use_openssl_rand_hex_32
-
-# Optional — defaults shown
-PORT=3000
-DATA_DIR=/data
 ```
 
 > **`MASTER_SECRET`** is the only truly required variable. It protects all encrypted values in the database (SSO secrets, SMTP passwords, destination credentials). **Keep it safe and back it up** — losing it makes encrypted data unrecoverable.
 
 ### 3. Start the server
 
+**HTTP only (default):**
+
 ```bash
 docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+```
+
+**With Caddy reverse proxy + automatic SSL:**
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env --profile proxy up -d
 ```
 
 ### 4. Open the web UI
@@ -98,6 +102,50 @@ You will be prompted to:
 2. **Complete the setup wizard** — server name, SMTP, SSO, and install your first agent
 
 That's it. All further configuration is done through the UI.
+
+---
+
+## Reverse Proxy & SSL (Caddy)
+
+BackupTool ships with an optional [Caddy](https://caddyserver.com/) reverse proxy that handles SSL/TLS termination and IP allowlisting. It is managed entirely from the UI — no manual config file editing required.
+
+### Enable
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env --profile proxy up -d
+```
+
+When the proxy profile is active, Caddy listens on ports **80** and **443**. Port 3000 on the host can be made internal-only by setting `EXPOSE_PORT=` (empty) in `.env`.
+
+### Configure in the UI
+
+Go to **Settings → Proxy / SSL** and configure:
+
+| Option | Description |
+|--------|-------------|
+| **Domain** | Hostname Caddy listens on (must resolve to this server's IP) |
+| **SSL mode: Auto** | Let's Encrypt — enter an ACME email, Caddy obtains and renews certs automatically |
+| **SSL mode: Custom** | Paste your own PEM certificate and private key (stored AES-256-GCM encrypted in DB) |
+| **SSL mode: HTTP only** | No TLS — useful behind another proxy or for LAN use |
+| **IP Allowlist** | CIDR ranges / IPs, one per line — requests from unlisted IPs get a 403 response |
+
+After saving, Caddy detects the updated `Caddyfile` via `--watch` and reloads automatically — **no container restart required**.
+
+### Example — Let's Encrypt
+
+1. Point your domain (e.g. `backup.example.com`) to the server's IP
+2. Start with `--profile proxy`
+3. In Settings → Proxy / SSL: set domain to `backup.example.com`, choose **Let's Encrypt**, enter email → **Save & apply**
+4. Caddy requests a certificate and serves HTTPS within seconds
+
+### Example — IP Allowlist (office + VPN only)
+
+```
+203.0.113.0/24    # office public IP range
+10.10.0.0/16      # VPN subnet
+```
+
+All other IPs receive a `403 Access Denied` response before reaching the application.
 
 ---
 

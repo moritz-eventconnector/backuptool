@@ -116,6 +116,11 @@ export const api = {
   deleteSsoConfig: (provider: "oidc" | "saml" | "ldap") =>
     request<{ message: string }>(`/settings/sso/${provider}`, { method: "DELETE" }),
 
+  // Settings — Proxy / SSL
+  getProxyConfig: () => request<ProxyConfig>("/settings/proxy"),
+  saveProxyConfig: (data: ProxyConfigInput) =>
+    request<{ message: string }>("/settings/proxy", { method: "PUT", body: JSON.stringify(data) }),
+
   // Settings — Users
   listUsers: () => request<User[]>("/settings/users"),
   createUser: (data: { email: string; name: string; password: string; role: string }) =>
@@ -250,6 +255,26 @@ export interface AppConfig {
   releasesBaseUrl?: string;
   resticBin: string;
   rcloneBin: string;
+}
+
+export interface ProxyConfig {
+  proxyEnabled: boolean;
+  proxyDomain: string;
+  proxySslMode: "off" | "letsencrypt" | "custom";
+  proxyLetsencryptEmail: string;
+  proxyAllowedIps: string[];
+  hasCert: boolean;
+  hasKey: boolean;
+}
+
+export interface ProxyConfigInput {
+  proxyEnabled: boolean;
+  proxyDomain?: string;
+  proxySslMode: "off" | "letsencrypt" | "custom";
+  proxyLetsencryptEmail?: string;
+  proxyAllowedIps: string[];
+  proxyCert?: string;
+  proxyKey?: string;
 }
 
 export interface SsoProviderRow {
