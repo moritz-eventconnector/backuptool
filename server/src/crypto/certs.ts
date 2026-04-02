@@ -91,7 +91,7 @@ export async function issueAgentCert(agentId: string): Promise<{
   cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 3);
 
   const subject = [
-    { name: "commonName", value: `agent:${agentId}` },
+    { name: "commonName", value: `agent-${agentId.replace(/[^A-Za-z0-9.:-]/g, "-")}` },
     { name: "organizationName", value: "BackupTool" },
   ];
   cert.setSubject(subject);
