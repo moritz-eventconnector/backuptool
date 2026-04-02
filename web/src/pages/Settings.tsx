@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Mail, Shield, Users, Plus, Trash2, Webhook } from "lucide-react";
+import { Settings as SettingsIcon, Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle } from "lucide-react";
 import { api, type User } from "../api/client";
 
 export default function Settings() {
@@ -294,44 +294,91 @@ function WebhookSettings() {
 }
 
 function SsoSettings() {
-  const [provider, setProvider] = useState("oidc");
+  const { data } = useQuery({ queryKey: ["sso-status"], queryFn: api.getSsoStatus });
+
+  const providers = [
+    {
+      key: "oidc" as const,
+      label: "OIDC (OpenID Connect)",
+      hint: "Google, Azure AD, Okta, Keycloak",
+      vars: "OIDC_ENABLED, OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET",
+      detail: data ? [
+        { label: "Issuer", value: data.oidc.issuerUrl },
+        { label: "Client ID", value: data.oidc.clientId },
+        { label: "Redirect URI", value: data.oidc.redirectUri },
+      ] : [],
+      enabled: data?.oidc.enabled ?? false,
+    },
+    {
+      key: "saml" as const,
+      label: "SAML 2.0",
+      hint: "ADFS, enterprise IdPs",
+      vars: "SAML_ENABLED, SAML_ENTRY_POINT, SAML_CERT, SAML_ISSUER",
+      detail: data ? [
+        { label: "Entry Point", value: data.saml.entryPoint },
+        { label: "Issuer", value: data.saml.issuer },
+        { label: "Callback URL", value: data.saml.callbackUrl },
+      ] : [],
+      enabled: data?.saml.enabled ?? false,
+    },
+    {
+      key: "ldap" as const,
+      label: "LDAP / Active Directory",
+      hint: "On-premise directory",
+      vars: "LDAP_ENABLED, LDAP_URL, LDAP_BIND_DN, LDAP_BIND_CREDENTIALS, LDAP_SEARCH_BASE",
+      detail: data ? [
+        { label: "URL", value: data.ldap.url },
+        { label: "Search Base", value: data.ldap.searchBase },
+        { label: "Search Filter", value: data.ldap.searchFilter },
+      ] : [],
+      enabled: data?.ldap.enabled ?? false,
+    },
+  ];
+
   return (
     <div className="card">
       <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Single Sign-On</h2>
-      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>Configure SSO providers. Requires Pro or Enterprise license.</p>
-      <div className="form-group">
-        <label>Provider</label>
-        <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="oidc">OIDC (OpenID Connect) — Google, Azure AD, Okta, Keycloak</option>
-          <option value="saml">SAML 2.0 — ADFS, Enterprise IdPs</option>
-          <option value="ldap">LDAP / Active Directory</option>
-        </select>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
+        SSO is configured via environment variables — not stored in the database.
+        Set the variables below and restart the server.
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {providers.map((p) => (
+          <div key={p.key} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px 14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: p.enabled ? 10 : 0 }}>
+              {p.enabled
+                ? <CheckCircle size={14} color="var(--success)" />
+                : <XCircle size={14} color="var(--text-muted)" />}
+              <span style={{ fontWeight: 500, fontSize: 13 }}>{p.label}</span>
+              <span style={{ color: "var(--text-muted)", fontSize: 12 }}>— {p.hint}</span>
+              <span className={`badge ${p.enabled ? "badge-success" : "badge-muted"}`} style={{ marginLeft: "auto", fontSize: 11 }}>
+                {p.enabled ? "Enabled" : "Disabled"}
+              </span>
+            </div>
+            {p.enabled && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {p.detail.map((d) => d.value && (
+                  <div key={d.label} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
+                    <span style={{ minWidth: 90 }}>{d.label}</span>
+                    <code style={{ color: "var(--text)" }}>{d.value}</code>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!p.enabled && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                Set <code>{p.vars.split(",")[0].trim()}=true</code> to enable.
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-      {provider === "oidc" && (
-        <>
-          <div className="form-group"><label>Issuer URL</label><input placeholder="https://accounts.google.com" /></div>
-          <div className="form-group"><label>Client ID</label><input /></div>
-          <div className="form-group"><label>Client Secret</label><input type="password" /></div>
-          <div className="form-group"><label>Redirect URI</label><input defaultValue="http://localhost:3000/api/auth/sso/oidc/callback" /></div>
-        </>
-      )}
-      {provider === "saml" && (
-        <>
-          <div className="form-group"><label>IdP SSO URL</label><input placeholder="https://idp.example.com/saml/sso" /></div>
-          <div className="form-group"><label>IdP Certificate (PEM)</label><textarea rows={4} /></div>
-          <div className="form-group"><label>SP Entity ID / Issuer</label><input defaultValue="backuptool" /></div>
-        </>
-      )}
-      {provider === "ldap" && (
-        <>
-          <div className="form-group"><label>LDAP URL</label><input placeholder="ldap://dc.example.com:389" /></div>
-          <div className="form-group"><label>Bind DN</label><input placeholder="cn=service,dc=example,dc=com" /></div>
-          <div className="form-group"><label>Bind Password</label><input type="password" /></div>
-          <div className="form-group"><label>Search Base</label><input placeholder="dc=example,dc=com" /></div>
-          <div className="form-group"><label>Search Filter</label><input defaultValue="(mail={{username}})" /></div>
-        </>
-      )}
-      <div className="alert alert-info" style={{ fontSize: 12 }}>SSO is configured via environment variables. See <code>.env.example</code> for <code>OIDC_*</code>, <code>SAML_*</code>, and <code>LDAP_*</code> variables.</div>
+
+      <div className="alert alert-info" style={{ fontSize: 12, marginTop: 16 }}>
+        See <code>.env.example</code> for all available <code>OIDC_*</code>, <code>SAML_*</code>, and <code>LDAP_*</code> variables.
+        Login endpoints: <code>/api/auth/sso/oidc/login</code> · <code>/api/auth/sso/ldap/login</code>
+      </div>
     </div>
   );
 }

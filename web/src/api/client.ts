@@ -101,6 +101,7 @@ export const api = {
     request("/settings/notifications", { method: "PUT", body: JSON.stringify(data) }),
   testNotification: (type: "email" | "webhook") =>
     request<{ message: string }>("/settings/notifications/test", { method: "POST", body: JSON.stringify({ type }) }),
+  getSsoStatus: () => request<SsoStatus>("/settings/sso-status"),
 
   // Settings — Users
   listUsers: () => request<User[]>("/settings/users"),
@@ -211,6 +212,12 @@ export interface NotificationSettings {
   webhookOnStart: boolean;
   webhookOnSuccess: boolean;
   webhookOnFailure: boolean;
+}
+
+export interface SsoStatus {
+  oidc: { enabled: boolean; issuerUrl: string | null; clientId: string | null; redirectUri: string; name: string };
+  saml: { enabled: boolean; entryPoint: string | null; issuer: string; callbackUrl: string };
+  ldap: { enabled: boolean; url: string | null; searchBase: string | null; searchFilter: string };
 }
 
 export interface DiscoveredService {

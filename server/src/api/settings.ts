@@ -10,6 +10,7 @@ import { encrypt, decrypt } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
 import { sendBackupNotification } from "../notifications/email.js";
 import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
+import { config } from "../config.js";
 
 export const settingsRouter = Router();
 
@@ -114,6 +115,31 @@ settingsRouter.put("/notifications", requireAuth, requireRole("admin"), (req, re
 
   logger.info({ adminId: req.user?.id ?? "system" }, "Notification settings updated");
   res.json({ message: "Notification settings saved" });
+});
+
+// ── GET /api/settings/sso-status — which SSO providers are configured ────────
+settingsRouter.get("/sso-status", requireAuth, (_req, res) => {
+  res.json({
+    oidc: {
+      enabled: config.oidc.enabled,
+      issuerUrl: config.oidc.issuerUrl || null,
+      clientId: config.oidc.clientId || null,
+      redirectUri: config.oidc.redirectUri,
+      name: config.oidc.name,
+    },
+    saml: {
+      enabled: config.saml.enabled,
+      entryPoint: config.saml.entryPoint || null,
+      issuer: config.saml.issuer,
+      callbackUrl: config.saml.callbackUrl,
+    },
+    ldap: {
+      enabled: config.ldap.enabled,
+      url: config.ldap.url || null,
+      searchBase: config.ldap.searchBase || null,
+      searchFilter: config.ldap.searchFilter,
+    },
+  });
 });
 
 // ── POST /api/settings/notifications/test — send a test notification ─────────
