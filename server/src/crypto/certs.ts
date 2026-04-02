@@ -90,10 +90,13 @@ export async function issueAgentCert(agentId: string): Promise<{
   cert.validity.notAfter = new Date();
   cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 3);
 
+  // Force UTF8String encoding (tag 12) so Go's strict x509 parser accepts any
+  // agentId character without PrintableString validation errors.
+  const UTF8 = forge.asn1.Type.UTF8;
   const subject = [
-    { name: "commonName", value: `agent-${agentId.replace(/[^A-Za-z0-9.:-]/g, "-")}` },
-    { name: "organizationName", value: "BackupTool" },
-  ];
+    { name: "commonName", value: `agent:${agentId}`, valueTagClass: UTF8 },
+    { name: "organizationName", value: "BackupTool", valueTagClass: UTF8 },
+  ] as forge.pki.CertificateField[];
   cert.setSubject(subject);
   cert.setIssuer(_caCert.subject.attributes);
   cert.setExtensions([
