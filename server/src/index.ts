@@ -114,7 +114,7 @@ async function main() {
   const webDistPath = path.join(process.cwd(), "..", "web", "dist");
   if (fs.existsSync(webDistPath)) {
     app.use(express.static(webDistPath));
-    app.get("*", (_req, res) => {
+    app.get("/{*path}", (_req, res) => {
       res.sendFile(path.join(webDistPath, "index.html"));
     });
   }
