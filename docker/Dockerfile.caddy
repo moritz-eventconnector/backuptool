@@ -8,8 +8,8 @@ FROM caddy:2-alpine
 COPY caddy-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Caddy data dir for ACME certificates / state
-VOLUME ["/data/caddy", "/config"]
+# Caddy config/state dir (ACME certificates live here; /data is the shared app volume)
+VOLUME ["/config"]
 
 EXPOSE 80 443
 
