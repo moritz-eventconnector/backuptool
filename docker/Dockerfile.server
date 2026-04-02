@@ -14,7 +14,7 @@ RUN corepack enable && pnpm install --frozen-lockfile
 
 # Copy source and build.
 COPY web ./web
-RUN pnpm --filter web build
+RUN pnpm --filter backuptool-web build
 
 # =============================================================================
 # Stage 2: Build the Node.js server (TypeScript → JavaScript)
@@ -32,7 +32,7 @@ RUN corepack enable && pnpm install --frozen-lockfile
 
 # Copy source and compile.
 COPY server ./server
-RUN pnpm --filter server build
+RUN pnpm --filter backuptool-server build
 
 # =============================================================================
 # Stage 3: Production image
