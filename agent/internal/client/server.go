@@ -31,11 +31,12 @@ func NewServerClient(serverURL, agentID, apiToken, certPEM, keyPEM, caCertPEM st
 			return nil, fmt.Errorf("load client cert: %w", err)
 		}
 
-		rootCAs := x509.NewCertPool()
+		rootCAs, err := x509.SystemCertPool()
+		if err != nil {
+			rootCAs = x509.NewCertPool()
+		}
 		if caCertPEM != "" {
-			if !rootCAs.AppendCertsFromPEM([]byte(caCertPEM)) {
-				return nil, fmt.Errorf("failed to append CA cert")
-			}
+			rootCAs.AppendCertsFromPEM([]byte(caCertPEM))
 		}
 
 		tlsCfg = &tls.Config{
