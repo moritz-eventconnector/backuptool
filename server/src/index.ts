@@ -100,10 +100,9 @@ async function main() {
   app.use("/api/internal", internalRouter);
   app.use("/api/settings", settingsRouter);
 
-  // Health check
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok", version: "1.0.0" });
-  });
+  // Health check — available at both /health and /api/health (Docker uses /api/health)
+  app.get("/health", (_req, res) => { res.json({ status: "ok", version: "1.0.0" }); });
+  app.get("/api/health", (_req, res) => { res.json({ status: "ok", version: "1.0.0" }); });
 
   // Serve React SPA in production
   const webDistPath = path.join(process.cwd(), "..", "web", "dist");

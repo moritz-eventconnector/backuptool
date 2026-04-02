@@ -73,6 +73,13 @@ function NotificationSettings() {
   const [onStart, setOnStart] = useState(false);
   const [onSuccess, setOnSuccess] = useState(true);
   const [onFailure, setOnFailure] = useState(true);
+  const [testResult, setTestResult] = useState("");
+
+  const testMut = useMutation({
+    mutationFn: () => api.testNotification("email"),
+    onSuccess: (d) => setTestResult(d.message),
+    onError: (e: Error) => setTestResult("Error: " + e.message),
+  });
 
   const effective = emailEnabled ?? data?.emailEnabled ?? false;
 
@@ -112,6 +119,7 @@ function NotificationSettings() {
       <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Email Notifications</h2>
       {save.isSuccess && <div className="alert alert-success" style={{ marginBottom: 12 }}>Settings saved.</div>}
       {save.isError && <div className="alert alert-error" style={{ marginBottom: 12 }}>{(save.error as Error).message}</div>}
+      {testResult && <div className={`alert ${testResult.startsWith("Error") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 12 }}>{testResult}</div>}
       <div className="form-group">
         <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)", cursor: "pointer" }}>
           <input type="checkbox" style={{ width: "auto" }} checked={effective} onChange={(e) => setEmailEnabled(e.target.checked)} />
@@ -141,9 +149,17 @@ function NotificationSettings() {
           </div>
         </>
       )}
-      <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
-        {save.isPending ? "Saving…" : "Save"}
-      </button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        {effective && (
+          <button className="btn-ghost" onClick={() => { setTestResult(""); testMut.mutate(); }} disabled={testMut.isPending}
+            style={{ border: "1px solid var(--border)" }}>
+            {testMut.isPending ? "Sending…" : "Send Test Email"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -159,6 +175,11 @@ function WebhookSettings() {
   const [onSuccess, setOnSuccess] = useState(true);
   const [onFailure, setOnFailure] = useState(true);
   const [testResult, setTestResult] = useState("");
+  const testMut = useMutation({
+    mutationFn: () => api.testNotification("webhook"),
+    onSuccess: (d) => setTestResult(d.message),
+    onError: (e: Error) => setTestResult("Error: " + e.message),
+  });
 
   const eff = enabled ?? data?.webhookEnabled ?? false;
 
@@ -261,6 +282,12 @@ function WebhookSettings() {
         <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </button>
+        {eff && url && (
+          <button className="btn-ghost" onClick={() => { setTestResult(""); testMut.mutate(); }} disabled={testMut.isPending}
+            style={{ border: "1px solid var(--border)" }}>
+            {testMut.isPending ? "Sending…" : "Send Test"}
+          </button>
+        )}
       </div>
     </div>
   );

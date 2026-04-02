@@ -8,6 +8,8 @@ import { requireAuth, requireRole } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
+import { sendBackupNotification } from "../notifications/email.js";
+import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
 
 export const settingsRouter = Router();
 
@@ -112,6 +114,79 @@ settingsRouter.put("/notifications", requireAuth, requireRole("admin"), (req, re
 
   logger.info({ adminId: req.user?.id ?? "system" }, "Notification settings updated");
   res.json({ message: "Notification settings saved" });
+});
+
+// ── POST /api/settings/notifications/test — send a test notification ─────────
+const testSchema = z.object({
+  type: z.enum(["email", "webhook"]),
+});
+
+settingsRouter.post("/notifications/test", requireAuth, requireRole("admin", "operator"), async (req, res) => {
+  const parse = testSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: "type must be 'email' or 'webhook'" });
+    return;
+  }
+
+  const db = getDb();
+  const [row] = db.select().from(notificationSettings).all();
+  if (!row) {
+    res.status(400).json({ error: "Notification settings not configured yet" });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const payload = {
+    jobName: "Test Job",
+    agentName: "BackupTool Server",
+    status: "success" as const,
+    startedAt: now,
+    finishedAt: now,
+    sizeBytes: 123_456_789,
+    fileCount: 42,
+    durationSeconds: 7.3,
+    snapshotId: "test-" + Date.now(),
+  };
+
+  if (parse.data.type === "email") {
+    if (!row.emailEnabled || !row.smtpHost) {
+      res.status(400).json({ error: "Email notifications are not configured" });
+      return;
+    }
+    const recipients: string[] = JSON.parse(row.emailRecipients ?? "[]");
+    if (recipients.length === 0) {
+      res.status(400).json({ error: "No recipients configured" });
+      return;
+    }
+    let smtpPass: string | undefined;
+    if (row.smtpPassEncrypted) {
+      try { smtpPass = decrypt(row.smtpPassEncrypted); } catch { /* ignore */ }
+    }
+    try {
+      await sendBackupNotification(recipients, payload, {
+        smtpHost: row.smtpHost, smtpPort: row.smtpPort,
+        smtpUser: row.smtpUser, smtpFrom: row.smtpFrom, smtpPass,
+      });
+      res.json({ message: `Test email sent to ${recipients.join(", ")}` });
+    } catch (err) {
+      logger.error({ err }, "Test email failed");
+      res.status(500).json({ error: (err as Error).message });
+    }
+    return;
+  }
+
+  // webhook
+  if (!row.webhookEnabled || !row.webhookUrl) {
+    res.status(400).json({ error: "Webhook notifications are not configured" });
+    return;
+  }
+  try {
+    await sendWebhookNotification(row.webhookUrl, (row.webhookType ?? "generic") as WebhookType, payload);
+    res.json({ message: `Test ${row.webhookType ?? "generic"} webhook sent to ${row.webhookUrl}` });
+  } catch (err) {
+    logger.error({ err }, "Test webhook failed");
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 // ── User Management ───────────────────────────────────────────────────────────

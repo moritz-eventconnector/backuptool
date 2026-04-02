@@ -99,6 +99,8 @@ export const api = {
   getNotificationSettings: () => request<NotificationSettings>("/settings/notifications"),
   saveNotificationSettings: (data: Partial<NotificationSettings>) =>
     request("/settings/notifications", { method: "PUT", body: JSON.stringify(data) }),
+  testNotification: (type: "email" | "webhook") =>
+    request<{ message: string }>("/settings/notifications/test", { method: "POST", body: JSON.stringify({ type }) }),
 
   // Settings — Users
   listUsers: () => request<User[]>("/settings/users"),
