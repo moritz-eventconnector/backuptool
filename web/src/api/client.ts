@@ -23,7 +23,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       }
       return retry.json();
     } else {
-      window.location.href = "/login";
       throw new ApiError(401, "Unauthorized");
     }
   }
