@@ -11,18 +11,10 @@ mkdir -p "${CADDY_DIR}"
 
 # Write the default Caddyfile if it doesn't exist OR if it still contains
 # the old HTTP-only default (so upgrades switch to HTTPS automatically).
-if [ ! -f "${CADDYFILE}" ] || grep -q "^:80 {" "${CADDYFILE}" 2>/dev/null; then
+if [ ! -f "${CADDYFILE}" ] || grep -q "tls internal" "${CADDYFILE}" 2>/dev/null; then
   cat > "${CADDYFILE}" <<'EOF'
-{
-    auto_https off
-}
-
+# Default Caddyfile — configure domain & SSL in Settings → Proxy / SSL.
 :80 {
-    redir https://{host}{uri} 308
-}
-
-:443 {
-    tls internal
     reverse_proxy server:3000
 }
 EOF
