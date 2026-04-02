@@ -2,7 +2,7 @@
 
 A self-hosted, encrypted backup orchestration system. Lightweight agents run on your machines, a central server manages everything, and a clean web UI gives you full visibility — all with no vendor lock-in.
 
-Built on [Restic](https://restic.net/) and [Rclone](https://rclone.org/), inspired by [Pluton](https://usepluton.com/).
+Built on [Restic](https://restic.net/) and [Rclone](https://rclone.org/).
 
 ---
 
@@ -10,16 +10,20 @@ Built on [Restic](https://restic.net/) and [Rclone](https://rclone.org/), inspir
 
 - **Cross-platform agents** — Linux, Windows, macOS (amd64 + arm64 single binaries)
 - **Kubernetes agent** — backs up PVCs and namespace resources (Deployments, Secrets, ConfigMaps, etc.)
-- **70+ storage backends** — S3, Backblaze B2, GCS, Azure Blob, SFTP, local, Rclone, Wasabi, MinIO
+- **70+ storage backends** — S3, Backblaze B2, GCS, Azure Blob, SFTP, local, Wasabi, MinIO, and all Rclone-supported backends
 - **End-to-end encryption** — Restic AES-256 encryption before upload; credentials encrypted at rest (AES-256-GCM)
 - **Incremental backups** — only changed data is transferred
+- **WORM / immutable backups** — S3 Object Lock support to make snapshots tamper-proof
 - **Retention policies** — keep-last, daily, weekly, monthly, yearly
+- **Auto-discovery** — agents automatically detect 20+ services (PostgreSQL, MySQL, MongoDB, Docker volumes, Kubernetes, etc.) and suggest backup paths
 - **Real-time monitoring** — live progress, logs, agent status via WebSocket
-- **SSO** — OIDC (Google, Azure AD, Okta, Keycloak), SAML 2.0, LDAP/Active Directory
+- **SSO** — OIDC (Google, Azure AD, Okta, Keycloak), SAML 2.0, LDAP/Active Directory — configured via UI, no restart required
+- **Webhook notifications** — Slack, Discord, ntfy, or any HTTP endpoint
+- **Email notifications** — SMTP alerts on backup start, success, or failure
+- **First-time setup wizard** — guided onboarding after installation
+- **UI-managed configuration** — all settings (SMTP, SSO, server name, …) are stored in the database and editable via the web UI
 - **Offline licensing** — Ed25519-signed license files, no phone-home required
 - **mTLS agent authentication** — per-agent client certificates issued by built-in CA
-- **Email notifications** — SMTP alerts on backup start, success, or failure
-- **Audit log** — full trail of user actions
 - **Role-based access** — admin, operator, viewer
 
 ---
@@ -53,27 +57,51 @@ Built on [Restic](https://restic.net/) and [Rclone](https://rclone.org/), inspir
 
 **Requirements:** Docker 24+, Docker Compose v2
 
+### 1. Clone the repository
+
 ```bash
-# 1. Clone the repository
 git clone https://github.com/moritz-eventconnector/backuptool.git
 cd backuptool
-
-# 2. Copy and configure environment variables
-cp docker/.env.example docker/.env
-# Edit docker/.env — at minimum set MASTER_SECRET and COOKIE_SECRET:
-#   MASTER_SECRET=$(openssl rand -hex 32)
-#   COOKIE_SECRET=$(openssl rand -hex 32)
-
-# 3. Start the server
-docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
-
-# 4. Open http://localhost:3000 in your browser
-# 5. Complete the first-time setup wizard (create admin user)
 ```
+
+### 2. Configure environment variables
+
+```bash
+cp docker/.env.example docker/.env
+```
+
+Open `docker/.env` and set at minimum:
+
+```env
+# Required — generate with: openssl rand -hex 32
+MASTER_SECRET=change_me_use_openssl_rand_hex_32
+
+# Optional — defaults shown
+PORT=3000
+DATA_DIR=/data
+```
+
+> **`MASTER_SECRET`** is the only truly required variable. It protects all encrypted values in the database (SSO secrets, SMTP passwords, destination credentials). **Keep it safe and back it up** — losing it makes encrypted data unrecoverable.
+
+### 3. Start the server
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+```
+
+### 4. Open the web UI
+
+Navigate to **http://localhost:3000** (or your server's IP/hostname).
+
+You will be prompted to:
+1. **Create an admin account** — name, email, password (min. 12 characters)
+2. **Complete the setup wizard** — server name, SMTP, SSO, and install your first agent
+
+That's it. All further configuration is done through the UI.
 
 ---
 
-## Installation — Manual (Development)
+## Installation — Manual / Development
 
 **Requirements:** Node.js 22+, pnpm 9+, Go 1.23+
 
@@ -81,132 +109,284 @@ docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
 # Install dependencies
 pnpm install
 
-# Start server + web UI in development mode (with hot reload)
+# Start server + web UI in development mode (hot reload)
 pnpm dev
+# Server:  http://localhost:3000
+# Web UI:  http://localhost:5173
+```
 
-# Server runs on http://localhost:3000
-# Vite dev server runs on http://localhost:5173 (proxies API to server)
+To build for production:
+
+```bash
+pnpm build        # builds server (tsc) + web UI (vite)
+pnpm start        # starts the compiled server (serves web UI from web/dist)
 ```
 
 ---
 
 ## Installing Agents
 
-### Linux / macOS
+### One-line install (recommended)
 
-Download the pre-built binary from the releases page, or build from source:
+After completing the setup wizard, go to **Agents → Add Agent**, enter a name, and copy the generated install command. It looks like:
 
 ```bash
-# Build for your current platform
+curl -fsSL https://your-server/api/agents/install.sh | sudo bash -s -- --token <TOKEN>
+```
+
+The script detects your OS/arch, downloads the correct binary, registers the agent, and installs it as a systemd service (Linux) or Windows Service automatically.
+
+### Manual install — Linux / macOS
+
+```bash
+# Build for your platform
 make agent-linux-amd64    # Linux x86_64
-make agent-linux-arm64    # Linux ARM64 (Raspberry Pi, etc.)
+make agent-linux-arm64    # Linux ARM64 (Raspberry Pi, AWS Graviton, …)
 make agent-darwin-amd64   # macOS Intel
 make agent-darwin-arm64   # macOS Apple Silicon
+# Binary written to: binaries/agent-<os>-<arch>
 
-# The binary is written to binaries/agent-<os>-<arch>
-```
-
-**Run the agent:**
-
-```bash
-# 1. In the web UI: go to Agents → Generate Token
-#    Copy the Agent ID and Registration Token
-
-# 2. Register and start the agent
+# 1. Generate a token in the web UI: Agents → Add Agent
+# 2. Register the agent (first run only)
 ./agent-linux-amd64 \
   --server http://your-server:3000 \
-  --agent-id <AGENT_ID> \
   --token <REGISTRATION_TOKEN> \
-  --name "My Server"
+  --name "web-01"
 
-# After registration, config is saved to ~/.backuptool-agent/agent.yaml
-# On subsequent starts, just run:
-./agent-linux-amd64 --server http://your-server:3000
+# Config is saved to /etc/backuptool-agent/agent.yaml
+# On subsequent starts:
+./agent-linux-amd64
 ```
 
-**Run as a systemd service (Linux):**
+**Run as a systemd service:**
 
-```ini
-# /etc/systemd/system/backuptool-agent.service
+```bash
+# Copy binary
+sudo cp binaries/agent-linux-amd64 /usr/local/bin/backuptool-agent
+sudo chmod +x /usr/local/bin/backuptool-agent
+
+# Create service file
+sudo tee /etc/systemd/system/backuptool-agent.service > /dev/null <<EOF
 [Unit]
 Description=BackupTool Agent
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/backuptool-agent --server http://your-server:3000
+ExecStart=/usr/local/bin/backuptool-agent
 Restart=always
 RestartSec=10
-User=backuptool
+User=root
 
 [Install]
 WantedBy=multi-user.target
-```
+EOF
 
-```bash
+sudo systemctl daemon-reload
 sudo systemctl enable --now backuptool-agent
+sudo systemctl status backuptool-agent
 ```
 
-### Windows
+### Manual install — Windows
 
 ```powershell
-# Download agent-windows-amd64.exe or build from source:
-# make agent-windows-amd64
+# Build (requires Go on the build machine):
+make agent-windows-amd64
+# Binary: binaries/agent-windows-amd64.exe
 
-# Register and run
-.\agent-windows-amd64.exe --server http://your-server:3000 --agent-id <ID> --token <TOKEN> --name "My PC"
+# 1. Generate a token in the web UI: Agents → Add Agent
+# 2. Register:
+.\agent-windows-amd64.exe --server http://your-server:3000 --token <TOKEN> --name "win-srv-01"
 
-# Run as a Windows Service (using NSSM or sc.exe):
-nssm install BackupToolAgent "C:\backuptool\agent-windows-amd64.exe" "--server http://your-server:3000"
+# Install as a Windows Service using NSSM (https://nssm.cc):
+nssm install BackupToolAgent "C:\backuptool\agent-windows-amd64.exe"
 nssm start BackupToolAgent
 ```
+
+### Agent auto-discovery
+
+When an agent first connects, it scans the host and reports discovered services to the server. Go to **Agents → (select agent) → Discovered Services** to review what was found and create backup jobs from the suggestions.
+
+Detected automatically:
+- PostgreSQL, MySQL / MariaDB, MongoDB, Redis, InfluxDB, CockroachDB
+- Docker volumes and Compose project data directories
+- Kubernetes (in-cluster): PVCs, etcd
+- Home directories, `/etc`, `/var/lib`, `/opt`
+- Application data: GitLab, Nextcloud, Gitea, Forgejo, Immich, Vaultwarden, Grafana, Prometheus, Elasticsearch, Meilisearch, Keycloak, Authentik
 
 ---
 
 ## Installing the Kubernetes Agent
 
-**Requirements:** Helm 3+, kubectl configured
+**Requirements:** Helm 3+, kubectl configured against the target cluster
 
 ```bash
-# 1. Build the k8s-agent image and push to your registry
-make k8s-agent
+# 1. Build and push the image
 docker build -f docker/Dockerfile.k8s-agent -t your-registry/backuptool-k8s-agent:latest .
 docker push your-registry/backuptool-k8s-agent:latest
 
-# 2. In the web UI: go to Agents → Generate Token
-#    Copy the Agent ID and Registration Token
+# 2. Generate a token in the web UI: Agents → Add Agent
 
 # 3. Install via Helm
 helm install backuptool-k8s-agent ./k8s-agent/helm \
   --namespace backuptool \
   --create-namespace \
   --set server.url=http://your-server:3000 \
-  --set server.agentId=<AGENT_ID> \
-  --set server.registrationToken=<REGISTRATION_TOKEN> \
+  --set server.registrationToken=<TOKEN> \
   --set image.repository=your-registry/backuptool-k8s-agent \
   --set image.tag=latest
 
-# 4. Verify the agent appears as online in the web UI
+# 4. Check the agent appears as "online" in the web UI
 kubectl get pods -n backuptool
 ```
 
-**Helm values reference** (`k8s-agent/helm/values.yaml`):
+**Helm values reference:**
 
 | Value | Default | Description |
 |-------|---------|-------------|
 | `server.url` | `""` | BackupTool server URL (required) |
-| `server.agentId` | `""` | Agent ID from the web UI (required) |
-| `server.registrationToken` | `""` | One-time registration token (required) |
-| `namespace` | `""` | Limit backups to this namespace (empty = all) |
-| `restic.bin` | `restic` | Path to restic binary |
+| `server.registrationToken` | `""` | One-time registration token from the UI |
+| `image.repository` | `""` | Your registry image path |
+| `image.tag` | `latest` | Image tag |
+| `namespace` | `""` | Limit to a single namespace (empty = all) |
 | `rbac.create` | `true` | Create ClusterRole with read permissions |
 | `resources.limits.memory` | `256Mi` | Container memory limit |
 
 ---
 
-## Building All Binaries
+## Configuration
+
+### Bootstrap environment variables
+
+Only these four variables need to be set as environment variables. Everything else is configured in the web UI.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASTER_SECRET` | *(required in prod)* | 32-byte hex secret — encrypts all credentials in the DB. Generate with `openssl rand -hex 32`. |
+| `DATA_DIR` | `./data` | Directory for SQLite database, PKI certs, and uploads |
+| `PORT` | `3000` | HTTP listen port |
+| `DB_PATH` | `$DATA_DIR/backuptool.db` | Override SQLite file path |
+
+> In development without `MASTER_SECRET` set, a fixed development key is used. **Always set this in production.**
+
+### In-UI configuration (Settings page)
+
+Everything else is configured in **Settings** and stored encrypted in the database:
+
+| Section | What you configure |
+|---------|-------------------|
+| **General** | Server name, public URL, restic/rclone binary paths |
+| **Email** | SMTP host/port/credentials, recipients, notification triggers |
+| **Webhooks** | Slack / Discord / ntfy / generic HTTP endpoint, triggers |
+| **SSO** | OIDC, SAML 2.0, LDAP/AD — edit and enable without restarting |
+| **Users** | Create/delete users, assign roles |
+
+---
+
+## SSO Configuration
+
+SSO providers are configured in **Settings → SSO / Auth**. No restart is required — changes take effect immediately.
+
+### OIDC (Google, Azure AD, Okta, Keycloak)
+
+1. Create an OAuth2 application in your identity provider
+2. Set the redirect/callback URI to `https://your-server/api/auth/sso/oidc/callback`
+3. In **Settings → SSO → OIDC**: enter Issuer URL, Client ID, Client Secret → Save
+
+Login URL: `https://your-server/api/auth/sso/oidc/login`
+
+### LDAP / Active Directory
+
+1. Create a service account with read access to your directory
+2. In **Settings → SSO → LDAP**: enter server URL, bind DN, password, search base → Save
+
+Login URL: `https://your-server/api/auth/sso/ldap/login`  
+Search filter default: `(mail={{username}})` — use `(sAMAccountName={{username}})` for Active Directory
+
+### SAML 2.0
+
+1. Register BackupTool as a Service Provider in your IdP
+2. In **Settings → SSO → SAML**: enter Entry Point URL, Issuer, IdP certificate → Save
+
+> SSO credentials (client secrets, bind passwords, certificates) are stored AES-256-GCM encrypted in the database.
+
+---
+
+## Webhook Notifications
+
+Configure in **Settings → Webhooks**. Supported providers:
+
+| Provider | URL format |
+|----------|-----------|
+| **Slack** | `https://hooks.slack.com/services/T…/B…/…` |
+| **Discord** | `https://discord.com/api/webhooks/…` |
+| **ntfy** | `https://ntfy.sh/my-topic` |
+| **Generic HTTP** | Any URL — receives a JSON body with event details |
+
+Triggers: job started, job succeeded, job failed (configurable independently).
+
+---
+
+## WORM / Immutable Backups
+
+Enable per backup job in **Jobs → (edit job) → WORM**. Requires an S3-compatible destination with Object Lock enabled.
+
+When enabled, each snapshot is locked with S3 Object Lock COMPLIANCE mode for the configured retention period. Locked snapshots cannot be deleted — not even by the backup tool itself or the storage account owner.
+
+**Setup on AWS S3:**
+1. Create a bucket with Object Lock enabled (must be done at bucket creation)
+2. Create a destination in BackupTool pointing to this bucket
+3. Enable WORM on the job and set a retention period in days
+
+---
+
+## License Management
+
+### Editions
+
+| Feature | Community | Pro | Enterprise |
+|---------|-----------|-----|------------|
+| Agents | 1 | Unlimited | Unlimited |
+| Storage backends | S3, local | All 70+ | All 70+ |
+| SSO (OIDC) | — | ✓ | ✓ |
+| SSO (SAML + LDAP) | — | — | ✓ |
+| Kubernetes Agent | — | — | ✓ |
+| Webhook notifications | ✓ | ✓ | ✓ |
+| Email notifications | ✓ | ✓ | ✓ |
+| WORM backups | — | ✓ | ✓ |
+
+### Uploading a license
+
+Go to **License** in the web UI → paste the license JWT → **Activate**.
+
+### Generating licenses (vendor tool)
 
 ```bash
-# Build everything (all agent platforms + k8s-agent + licenser)
+# Generate a keypair once; keep the private key secure
+./binaries/licenser keygen --private-key ./keys/private.pem --public-key ./keys/public.pem
+
+# Set the public key in the server environment:
+export LICENSE_PUBLIC_KEY=$(base64 -w0 ./keys/public.pem)
+
+# Issue a Pro license
+./binaries/licenser generate \
+  --private-key ./keys/private.pem \
+  --customer-id "cust_123" \
+  --customer-name "Acme Corp" \
+  --edition pro \
+  --seats 20 \
+  --expiry 2027-12-31 \
+  --output acme-corp.license
+
+# Verify a license file
+./binaries/licenser verify --license acme-corp.license --public-key ./keys/public.pem
+```
+
+---
+
+## Building from Source
+
+```bash
+# All binaries (all agent platforms + k8s-agent + licenser)
 make build-all
 
 # Individual targets
@@ -221,156 +401,42 @@ make licenser
 
 ---
 
-## Configuration
-
-### Server Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | HTTP server port |
-| `DATA_DIR` | `./data` | Directory for SQLite DB, PKI certs, etc. |
-| `MASTER_SECRET` | *(required in prod)* | 32-byte secret for AES-256-GCM credential encryption |
-| `COOKIE_SECRET` | *(required in prod)* | Secret for cookie signing |
-| `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
-| `LICENSE_PUBLIC_KEY` | — | Base64-encoded Ed25519 public key for license verification |
-
-**SMTP (email notifications):**
-
-| Variable | Description |
-|----------|-------------|
-| `SMTP_HOST` | SMTP server hostname |
-| `SMTP_PORT` | SMTP port (default: 587) |
-| `SMTP_USER` | SMTP username |
-| `SMTP_PASS` | SMTP password |
-| `SMTP_FROM` | From address |
-
-**OIDC Single Sign-On:**
-
-| Variable | Description |
-|----------|-------------|
-| `OIDC_ENABLED` | `true` to enable |
-| `OIDC_ISSUER_URL` | IdP issuer URL (e.g. `https://accounts.google.com`) |
-| `OIDC_CLIENT_ID` | OAuth2 client ID |
-| `OIDC_CLIENT_SECRET` | OAuth2 client secret |
-| `OIDC_REDIRECT_URI` | Callback URL (e.g. `https://backup.example.com/api/auth/sso/oidc/callback`) |
-| `OIDC_NAME` | Display name shown on login page |
-
-**SAML 2.0:**
-
-| Variable | Description |
-|----------|-------------|
-| `SAML_ENABLED` | `true` to enable |
-| `SAML_ENTRY_POINT` | IdP SSO URL |
-| `SAML_ISSUER` | SP entity ID |
-| `SAML_CERT` | IdP certificate (PEM, base64-encoded) |
-| `SAML_CALLBACK_URL` | SP callback URL |
-
-**LDAP / Active Directory:**
-
-| Variable | Description |
-|----------|-------------|
-| `LDAP_ENABLED` | `true` to enable |
-| `LDAP_URL` | LDAP server URL (e.g. `ldap://dc.example.com:389`) |
-| `LDAP_BIND_DN` | Service account DN |
-| `LDAP_BIND_CREDENTIALS` | Service account password |
-| `LDAP_SEARCH_BASE` | Search base DN |
-| `LDAP_SEARCH_FILTER` | Search filter (default: `(mail={{username}})`) |
-
----
-
-## License Management
-
-BackupTool uses offline Ed25519-signed licenses — no internet connection required for verification.
-
-### Editions
-
-| Feature | Community | Pro | Enterprise |
-|---------|-----------|-----|------------|
-| Agents | 1 | Unlimited | Unlimited |
-| Storage backends | S3, local | All 70+ | All 70+ |
-| SSO (OIDC) | — | ✓ | ✓ |
-| SSO (SAML + LDAP) | — | — | ✓ |
-| Kubernetes Agent | — | — | ✓ |
-| Audit Log | — | ✓ | ✓ |
-| Email Notifications | ✓ | ✓ | ✓ |
-
-### Uploading a License
-
-1. Go to **License** in the web UI
-2. Paste your license JWT and click **Activate**
-
-Or via API:
-```bash
-curl -X POST http://localhost:3000/api/license \
-  -H "Content-Type: application/json" \
-  -H "Cookie: access_token=<token>" \
-  -d '{"license": "eyJhbGci..."}'
-```
-
-### Generating Licenses (Vendor Tool)
-
-```bash
-# Generate keypair (do this once; keep private key secure)
-./binaries/licenser keygen --private-key ./keys/private.pem --public-key ./keys/public.pem
-
-# Set the public key in server environment:
-export LICENSE_PUBLIC_KEY=$(base64 -w0 ./keys/public.pem)
-
-# Generate a Pro license for a customer
-./binaries/licenser generate \
-  --private-key ./keys/private.pem \
-  --customer-id "cust_123" \
-  --customer-name "Acme Corp" \
-  --edition pro \
-  --seats 20 \
-  --features "sso,audit_log" \
-  --expiry 2027-12-31 \
-  --output acme-corp.license
-
-# Verify a license file
-./binaries/licenser verify --license acme-corp.license --public-key ./keys/public.pem
-```
-
----
-
 ## Development
 
 ```bash
-# Install dependencies
+# Install all dependencies
 pnpm install
 
-# Start everything in dev mode
+# Start server + frontend in watch mode
 pnpm dev
 
-# Run database migrations
-make db-migrate
+# Type-check only (no emit)
+cd server && npx tsc --noEmit
+cd web    && npx tsc --noEmit
 
-# Generate migration files after schema changes
-make db-generate
+# Build production artifacts
+pnpm build
 
-# Build Docker image
+# Docker
 make docker-build
-
-# Run with Docker Compose
 make docker-up
 make docker-down
-
-# Lint + type-check
-cd server && pnpm tsc --noEmit
-cd web && pnpm tsc --noEmit
 ```
 
 ---
 
 ## Security
 
-- **Passwords**: Argon2id (OWASP recommended)
-- **JWT**: RS256 asymmetric signing, 15-minute access tokens with rotation
-- **Agent auth**: mTLS mutual TLS — per-agent client certificates from built-in CA
-- **Credentials at rest**: AES-256-GCM with PBKDF2 key derivation
-- **Backup data**: Restic AES-256-CTR + Poly1305 (ChaCha20-Poly1305)
-- **Licenses**: Ed25519 signatures (fully offline verification)
-- **HTTP**: Helmet security headers, rate limiting, CORS, CSRF protection
+| Area | Implementation |
+|------|---------------|
+| Passwords | Argon2id (OWASP recommended parameters) |
+| JWT | RS256 asymmetric, 15-min access tokens with silent refresh |
+| Agent auth | mTLS — per-agent client certificates from built-in CA |
+| Credentials at rest | AES-256-GCM with PBKDF2 key derivation from `MASTER_SECRET` |
+| Backup data | Restic AES-256-CTR + Poly1305 |
+| SSO secrets | AES-256-GCM encrypted in SQLite |
+| Licenses | Ed25519 offline signatures |
+| HTTP hardening | Helmet CSP, rate limiting, CORS, CSRF cookies |
 
 ---
 
