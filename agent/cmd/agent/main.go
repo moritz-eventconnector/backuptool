@@ -74,6 +74,7 @@ func main() {
 			Arch:              runtime.GOARCH,
 			Hostname:          hostname(),
 			Version:           version,
+			Tags:              []string{},
 		})
 		if err != nil {
 			log.Fatalf("Registration failed: %v", err)
