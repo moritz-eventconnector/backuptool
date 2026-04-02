@@ -208,7 +208,7 @@ jobsRouter.post("/:id/run", requireAuth, requireRole("admin", "operator"), (req,
         if (notifRow.smtpPassEncrypted) {
           try { smtpPass = decrypt(notifRow.smtpPassEncrypted); } catch { /* ignore */ }
         }
-        sendBackupNotification(recipients, { jobName, agentName, status: "running", startedAt, snapshotId }, {
+        sendBackupNotification(recipients, { jobName, agentName, status: "started", startedAt, snapshotId }, {
           smtpHost: notifRow.smtpHost, smtpPort: notifRow.smtpPort,
           smtpUser: notifRow.smtpUser, smtpFrom: notifRow.smtpFrom, smtpPass,
         }).catch((err) => logger.error({ err }, "Start email notification failed"));
@@ -219,7 +219,7 @@ jobsRouter.post("/:id/run", requireAuth, requireRole("admin", "operator"), (req,
       sendWebhookNotification(
         notifRow.webhookUrl,
         (notifRow.webhookType ?? "generic") as WebhookType,
-        { jobName, agentName, status: "running", startedAt, snapshotId },
+        { jobName, agentName, status: "started", startedAt, snapshotId },
       ).catch((err) => logger.error({ err }, "Start webhook notification failed"));
     }
   } catch (err) {

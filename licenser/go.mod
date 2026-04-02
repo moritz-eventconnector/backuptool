@@ -3,7 +3,7 @@ module github.com/backuptool/licenser
 go 1.23
 
 require (
-	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/spf13/cobra v1.8.1
 )
 
