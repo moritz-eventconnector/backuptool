@@ -145,6 +145,18 @@ export const auditLog = sqliteTable("audit_log", {
   createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 
+// ── App Config (replaces most env vars) ──────────────────────────────────────
+export const appConfig = sqliteTable("app_config", {
+  id: text("id").primaryKey().default("singleton"),
+  serverName: text("server_name").notNull().default("BackupTool"),
+  serverUrl: text("server_url"),           // e.g. https://backup.example.com
+  setupCompleted: integer("setup_completed", { mode: "boolean" }).notNull().default(false),
+  releasesBaseUrl: text("releases_base_url"),
+  resticBin: text("restic_bin").notNull().default("restic"),
+  rcloneBin: text("rclone_bin").notNull().default("rclone"),
+  updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+});
+
 // ── SSO Config ────────────────────────────────────────────────────────────────
 export const ssoConfig = sqliteTable("sso_config", {
   id: text("id").primaryKey(),

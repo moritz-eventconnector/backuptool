@@ -101,6 +101,20 @@ export const api = {
     request("/settings/notifications", { method: "PUT", body: JSON.stringify(data) }),
   testNotification: (type: "email" | "webhook") =>
     request<{ message: string }>("/settings/notifications/test", { method: "POST", body: JSON.stringify({ type }) }),
+  getSsoStatus: () => request<SsoStatus>("/settings/sso-status"),
+
+  // Settings — App Config
+  getSetupStatus: () => request<{ setupCompleted: boolean }>("/settings/setup-status"),
+  getAppConfig: () => request<AppConfig>("/settings/app-config"),
+  saveAppConfig: (data: Partial<AppConfig>) =>
+    request<{ message: string }>("/settings/app-config", { method: "PUT", body: JSON.stringify(data) }),
+
+  // Settings — SSO Config (DB-backed)
+  getSsoConfig: () => request<SsoProviderRow[]>("/settings/sso"),
+  saveSsoConfig: (provider: "oidc" | "saml" | "ldap", data: { enabled: boolean; config: Record<string, unknown> }) =>
+    request<{ message: string }>(`/settings/sso/${provider}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSsoConfig: (provider: "oidc" | "saml" | "ldap") =>
+    request<{ message: string }>(`/settings/sso/${provider}`, { method: "DELETE" }),
 
   // Settings — Users
   listUsers: () => request<User[]>("/settings/users"),
@@ -213,6 +227,12 @@ export interface NotificationSettings {
   webhookOnFailure: boolean;
 }
 
+export interface SsoStatus {
+  oidc: { enabled: boolean; issuerUrl: string | null; clientId: string | null; redirectUri: string; name: string };
+  saml: { enabled: boolean; entryPoint: string | null; issuer: string; callbackUrl: string };
+  ldap: { enabled: boolean; url: string | null; searchBase: string | null; searchFilter: string };
+}
+
 export interface DiscoveredService {
   name: string;
   type: string;
@@ -221,6 +241,22 @@ export interface DiscoveredService {
   postScript: string;
   note: string;
   priority: "critical" | "recommended" | "optional";
+}
+
+export interface AppConfig {
+  serverName: string;
+  serverUrl?: string;
+  setupCompleted: boolean;
+  releasesBaseUrl?: string;
+  resticBin: string;
+  rcloneBin: string;
+}
+
+export interface SsoProviderRow {
+  provider: "oidc" | "saml" | "ldap";
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
 }
 
 export interface LicenseInfo {

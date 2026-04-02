@@ -10,16 +10,24 @@ import Snapshots from "./pages/Snapshots.tsx";
 import Destinations from "./pages/Destinations.tsx";
 import LicensePage from "./pages/License.tsx";
 import Settings from "./pages/Settings.tsx";
+import Onboarding from "./pages/Onboarding.tsx";
 import { useEffect, useState } from "react";
 import { api } from "./api/client.ts";
 
 function AppRoutes() {
   const { user, loading } = useAuth();
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+  const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null);
 
   useEffect(() => {
     api.setupRequired().then((r) => setSetupRequired(r.setupRequired)).catch(() => setSetupRequired(false));
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      api.getSetupStatus().then((r) => setSetupCompleted(r.setupCompleted)).catch(() => setSetupCompleted(true));
+    }
+  }, [user]);
 
   if (loading || setupRequired === null) {
     return (
@@ -32,7 +40,7 @@ function AppRoutes() {
   if (setupRequired) {
     return (
       <Routes>
-        <Route path="/setup" element={<Setup onComplete={() => setSetupRequired(false)} />} />
+        <Route path="/setup" element={<Setup onComplete={() => { setSetupRequired(false); }} />} />
         <Route path="*" element={<Navigate to="/setup" replace />} />
       </Routes>
     );
@@ -43,6 +51,16 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
+
+  // After first registration, redirect to onboarding wizard
+  if (setupCompleted === false) {
+    return (
+      <Routes>
+        <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="*" element={<Navigate to="/onboarding" replace />} />
       </Routes>
     );
   }

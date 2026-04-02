@@ -24,6 +24,8 @@ import { licenseRouter } from "./api/license.js";
 import { internalRouter } from "./api/internal.js";
 import { settingsRouter } from "./api/settings.js";
 import { installRouter } from "./api/install.js";
+import { appConfigRouter } from "./api/app-config.js";
+import { ssoConfigRouter } from "./api/sso-config.js";
 
 async function main() {
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -99,6 +101,8 @@ async function main() {
   app.use("/api/license", licenseRouter);
   app.use("/api/internal", internalRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/settings", appConfigRouter);
+  app.use("/api/settings", ssoConfigRouter);
 
   // Health check — available at both /health and /api/health (Docker uses /api/health)
   app.get("/health", (_req, res) => { res.json({ status: "ok", version: "1.0.0" }); });
