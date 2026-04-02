@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
@@ -24,17 +24,19 @@ const registerSchema = z.object({
   password: z.string().min(12, "Password must be at least 12 characters"),
 });
 
-function setTokenCookies(res: Response, accessToken: string, refreshToken: string) {
-  const isProduction = config.env === "production";
+function setTokenCookies(req: Request, res: Response, accessToken: string, refreshToken: string) {
+  // Use req.secure so cookies work over plain HTTP too (e.g. behind an HTTP Caddy proxy).
+  // Express sets req.secure=true when X-Forwarded-Proto=https and trust proxy is enabled.
+  const secure = req.secure;
   res.cookie("access_token", accessToken, {
     httpOnly: true,
-    secure: isProduction,
+    secure,
     sameSite: "strict",
     maxAge: 15 * 60 * 1000, // 15 min
   });
   res.cookie("refresh_token", refreshToken, {
     httpOnly: true,
-    secure: isProduction,
+    secure,
     sameSite: "strict",
     path: "/api/auth/refresh",
     maxAge: refreshTokenTtlMs(),
@@ -91,7 +93,7 @@ authRouter.post("/login", async (req, res) => {
     userAgent: req.headers["user-agent"],
   }).run();
 
-  setTokenCookies(res, accessToken, rawRefreshToken);
+  setTokenCookies(req, res, accessToken, rawRefreshToken);
 
   res.json({
     user: { id: user.id, email: user.email, name: user.name, role: user.role },
@@ -169,7 +171,7 @@ authRouter.post("/refresh", (req, res) => {
     expiresAt: new Date(Date.now() + refreshTokenTtlMs()).toISOString(),
   }).run();
 
-  setTokenCookies(res, accessToken, newRawToken);
+  setTokenCookies(req, res, accessToken, newRawToken);
   res.json({ accessToken });
 });
 
