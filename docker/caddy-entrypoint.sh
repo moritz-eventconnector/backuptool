@@ -9,19 +9,22 @@ CADDYFILE="${CADDY_DIR}/Caddyfile"
 
 mkdir -p "${CADDY_DIR}"
 
-# Write a minimal fallback Caddyfile only if one does not exist yet.
-# The BackupTool server will overwrite this with the real config once the
-# admin saves proxy settings in the UI.
-if [ ! -f "${CADDYFILE}" ]; then
+# Write the default Caddyfile if it doesn't exist OR if it still contains
+# the old HTTP-only default (so upgrades switch to HTTPS automatically).
+if [ ! -f "${CADDYFILE}" ] || grep -q "^:80 {" "${CADDYFILE}" 2>/dev/null; then
   cat > "${CADDYFILE}" <<'EOF'
 # Default Caddyfile — replace via Settings → Proxy / SSL in the BackupTool UI.
+# Uses Caddy's internal CA to serve HTTPS immediately (self-signed).
+# Browser will show a one-time security warning — this is expected.
+# Configure a real domain + Let's Encrypt cert in the UI to remove it.
+
 :80 {
-    reverse_proxy server:3000 {
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-    }
+    redir https://{host}{uri} 308
+}
+
+:443 {
+    tls internal
+    reverse_proxy server:3000
 }
 EOF
   echo "[caddy-entrypoint] Created default Caddyfile at ${CADDYFILE}"
