@@ -10,8 +10,9 @@ export default function Snapshots() {
   const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [restoreDialog, setRestoreDialog] = useState<{ snapshotId: string } | null>(null);
+  const [restoreDialog, setRestoreDialog] = useState<{ snapshotId: string; jobId: string } | null>(null);
   const [restorePath, setRestorePath] = useState("");
+  const [restoreMode, setRestoreMode] = useState<"original" | "custom">("original");
   const [restoreMsg, setRestoreMsg] = useState("");
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
@@ -36,25 +37,64 @@ export default function Snapshots() {
       </div>
 
       {/* Restore Dialog */}
-      {restoreDialog && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-          <div className="card" style={{ width: 440, background: "var(--bg-secondary)" }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Restore Snapshot</h3>
-            {restoreMsg && <div className={`alert ${restoreMsg.startsWith("Error") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 10 }}>{restoreMsg}</div>}
-            <div className="form-group">
-              <label>Restore to path</label>
-              <input value={restorePath} onChange={(e) => setRestorePath(e.target.value)} placeholder="/tmp/restore" autoFocus />
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn-primary" disabled={!restorePath || restoreMut.isPending}
-                onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: restorePath }); }}>
-                {restoreMut.isPending ? "Restoring…" : "Restore"}
-              </button>
-              <button className="btn-ghost" onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); }}>Close</button>
+      {restoreDialog && (() => {
+        const dialogJob = jobs.find((j) => j.id === restoreDialog.jobId);
+        const sourcePaths: string[] = dialogJob?.sourcePaths ? JSON.parse(dialogJob.sourcePaths as string) : [];
+        const effectivePath = restoreMode === "original" ? "/" : restorePath;
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+            <div className="card" style={{ width: 480, background: "var(--bg-secondary)" }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Restore Snapshot</h3>
+              {restoreMsg && <div className={`alert ${restoreMsg.startsWith("Error") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 10 }}>{restoreMsg}</div>}
+
+              {sourcePaths.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>BACKED UP PATHS</div>
+                  <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>
+                    {sourcePaths.map((p) => <div key={p} style={{ color: "var(--text-secondary)" }}>{p}</div>)}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                <button
+                  className={restoreMode === "original" ? "btn-primary" : "btn-ghost"}
+                  style={{ flex: 1, fontSize: 13 }}
+                  onClick={() => setRestoreMode("original")}
+                >
+                  Restore to original location
+                </button>
+                <button
+                  className={restoreMode === "custom" ? "btn-primary" : "btn-ghost"}
+                  style={{ flex: 1, fontSize: 13 }}
+                  onClick={() => setRestoreMode("custom")}
+                >
+                  Restore to custom path
+                </button>
+              </div>
+
+              {restoreMode === "original" ? (
+                <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "10px 12px", fontSize: 13, color: "var(--text-muted)", marginBottom: 14 }}>
+                  Files will be restored to their <strong style={{ color: "var(--warning, #f59e0b)" }}>original paths</strong> on the agent host. Existing files may be overwritten.
+                </div>
+              ) : (
+                <div className="form-group">
+                  <label>Restore to path</label>
+                  <input value={restorePath} onChange={(e) => setRestorePath(e.target.value)} placeholder="/tmp/restore" autoFocus />
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-primary" disabled={(restoreMode === "custom" && !restorePath) || restoreMut.isPending}
+                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath }); }}>
+                  {restoreMut.isPending ? "Restoring…" : "Restore"}
+                </button>
+                <button className="btn-ghost" onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); }}>Cancel</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 40 }}><div className="spinner" style={{ margin: "0 auto" }} /></div>
@@ -101,7 +141,7 @@ export default function Snapshots() {
                           {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                           {s.status === "success" && (
                             <button className="btn-ghost" style={{ padding: "3px 6px" }} title="Restore"
-                              onClick={(e) => { e.stopPropagation(); setRestoreDialog({ snapshotId: s.id }); setRestorePath(""); setRestoreMsg(""); }}>
+                              onClick={(e) => { e.stopPropagation(); setRestoreDialog({ snapshotId: s.id, jobId: s.jobId }); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); }}>
                               <RotateCcw size={12} color="var(--primary)" />
                             </button>
                           )}
