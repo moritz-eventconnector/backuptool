@@ -8,6 +8,7 @@ import { requireAuth, requireRole } from "../auth/middleware.js";
 import { randomToken, sha256 } from "../crypto/encryption.js";
 import { issueAgentCert, getCACert } from "../crypto/certs.js";
 import { logger } from "../logger.js";
+import { sendToAgent, isAgentOnline } from "../websocket/index.js";
 
 export const agentsRouter = Router();
 
@@ -121,9 +122,18 @@ agentsRouter.delete("/:id", requireAuth, requireRole("admin"), (req, res) => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
+
+  // Tell the agent to uninstall itself if it's currently connected.
+  // Best-effort — if the agent is offline it will fail to reconnect once
+  // its DB record and API token are gone.
+  const wasOnline = isAgentOnline(req.params.id);
+  if (wasOnline) {
+    sendToAgent(req.params.id, { type: "uninstall" });
+  }
+
   db.delete(agents).where(eq(agents.id, req.params.id)).run();
-  logger.info({ agentId: req.params.id }, "Agent deleted");
-  res.json({ message: "Agent deleted" });
+  logger.info({ agentId: req.params.id, uninstallSent: wasOnline }, "Agent deleted");
+  res.json({ message: "Agent deleted", uninstallSent: wasOnline });
 });
 
 // PATCH /api/agents/:id
