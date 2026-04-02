@@ -47,14 +47,18 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Install runtime backup utilities.
-RUN apk add --no-cache restic rclone
+# Install runtime backup utilities + su-exec (lightweight privilege drop).
+RUN apk add --no-cache restic rclone su-exec
 
 # Copy the pre-built web UI static assets.
 COPY --from=web-builder /app/web/dist ./web/dist
 
-# Copy the compiled server, its production node_modules, and package.json
-# (package.json is needed by some runtime resolution paths).
+# Copy the pnpm virtual store (root node_modules/.pnpm) — workspace symlinks
+# in server/node_modules resolve into this store at runtime.
+COPY --from=server-builder /app/node_modules ./node_modules
+
+# Copy the compiled server, its workspace node_modules (symlinks into the
+# root store above), and package.json.
 COPY --from=server-builder /app/server/dist         ./server/dist
 COPY --from=server-builder /app/server/node_modules ./server/node_modules
 COPY --from=server-builder /app/server/package.json ./server/
@@ -67,8 +71,11 @@ EXPOSE 3000
 # Persist application data (SQLite database, uploaded files, etc.) on a volume.
 VOLUME ["/data"]
 
-# Run as non-root for least-privilege operation.
+# Create the service user. The entrypoint runs as root, fixes /data ownership,
+# then drops to this user via su-exec before exec'ing Node.
 RUN addgroup -S backuptool && adduser -S -G backuptool backuptool
-USER backuptool
 
-CMD ["node", "dist/index.js"]
+COPY docker/server-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
