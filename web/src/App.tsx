@@ -59,7 +59,7 @@ function AppRoutes() {
   if (setupCompleted === false) {
     return (
       <Routes>
-        <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/onboarding" element={<Onboarding onComplete={() => setSetupCompleted(true)} />} />
         <Route path="*" element={<Navigate to="/onboarding" replace />} />
       </Routes>
     );
