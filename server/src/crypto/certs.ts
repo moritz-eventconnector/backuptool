@@ -92,11 +92,10 @@ export async function issueAgentCert(agentId: string): Promise<{
 
   // Force UTF8String encoding (tag 12) so Go's strict x509 parser accepts any
   // agentId character without PrintableString validation errors.
-  const UTF8 = forge.asn1.Type.UTF8;
   const subject = [
-    { name: "commonName", value: `agent:${agentId}`, valueTagClass: UTF8 },
-    { name: "organizationName", value: "BackupTool", valueTagClass: UTF8 },
-  ] as forge.pki.CertificateField[];
+    { name: "commonName", value: `agent:${agentId}`, valueTagClass: 12 },
+    { name: "organizationName", value: "BackupTool", valueTagClass: 12 },
+  ] as unknown as forge.pki.CertificateField[];
   cert.setSubject(subject);
   cert.setIssuer(_caCert.subject.attributes);
   cert.setExtensions([
