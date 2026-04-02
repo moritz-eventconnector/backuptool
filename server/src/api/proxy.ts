@@ -42,25 +42,22 @@ function buildCaddyfile(opts: {
 
   const lines: string[] = [];
 
-  // Global block — always disable auto_https (we manage TLS explicitly),
-  // and add ACME email for Let's Encrypt.
-  lines.push("{");
-  lines.push("    auto_https off");
+  // Global block:
+  // - letsencrypt: only set ACME email, let Caddy handle auto-HTTPS normally
+  // - custom/off:  disable auto_https so we can manage TLS manually
   if (sslMode === "letsencrypt" && letsencryptEmail) {
+    lines.push("{");
     lines.push(`    email ${letsencryptEmail}`);
-  }
-  lines.push("}");
-  lines.push("");
-
-  // Determine site address
-  let siteAddr: string;
-  if (!domain || sslMode === "off") {
-    siteAddr = ":80";
-  } else {
-    siteAddr = domain; // letsencrypt or custom — Caddy uses the domain for ACME/SNI
+    lines.push("}");
+    lines.push("");
+  } else if (sslMode === "custom") {
+    lines.push("{");
+    lines.push("    auto_https off");
+    lines.push("}");
+    lines.push("");
   }
 
-  // HTTP → HTTPS redirect block for named domains with SSL
+  // HTTP → HTTPS redirect for named domains with SSL
   if (domain && sslMode !== "off") {
     lines.push(`http://${domain} {`);
     lines.push(`    redir https://${domain}{uri} 308`);
@@ -68,13 +65,14 @@ function buildCaddyfile(opts: {
     lines.push("");
   }
 
+  // Site address
+  const siteAddr = domain && sslMode !== "off" ? domain : ":80";
   lines.push(`${siteAddr} {`);
 
-  // TLS directive
+  // TLS directive — only needed for custom certs; letsencrypt is automatic
   if (sslMode === "custom") {
     lines.push("    tls /data/caddy/cert.pem /data/caddy/key.pem");
   }
-  // letsencrypt: Caddy handles TLS automatically for named domains — no directive needed
 
   // IP allowlist
   if (allowedIps.length > 0) {
