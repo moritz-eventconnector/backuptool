@@ -28,7 +28,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.server
-    image: backuptool/server:latest
+    image: backuptool-server:local
     restart: unless-stopped
     ports:
       # Without the proxy profile this is the only port exposed.
@@ -67,7 +67,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.caddy
-    image: backuptool/caddy:latest
+    image: backuptool-caddy:local
     restart: unless-stopped
     depends_on:
       server:
@@ -92,7 +92,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.agent
-    image: backuptool/agent:latest
+    image: backuptool-agent:local
     restart: unless-stopped
     depends_on:
       server:
