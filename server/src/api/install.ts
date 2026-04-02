@@ -40,6 +40,23 @@ function validateInstallToken(agentId: string, token: string): boolean {
 // Looks in $DATA_DIR/binaries/ first, then redirects to RELEASES_BASE_URL.
 
 installRouter.get("/binary/:os/:arch", requireAuth, requireRole("admin", "operator"), (req, res) => {
+  serveBinary(req, res);
+});
+
+// ── GET /api/agents/install/:agentId/:token/binary/:os/:arch ─────────────────
+// Token-authenticated binary download used by the install script on fresh machines
+// (no session cookie available). Validates the agentId+token pair.
+
+installRouter.get("/install/:agentId/:token/binary/:os/:arch", (req: Request, res: Response) => {
+  const { agentId, token } = req.params;
+  if (!validateInstallToken(agentId, token)) {
+    res.status(401).json({ error: "Invalid or expired install token" });
+    return;
+  }
+  serveBinary(req, res);
+});
+
+function serveBinary(req: Request, res: Response) {
   const { os, arch } = req.params;
   const validOS = ["linux", "darwin", "windows"];
   const validArch = ["amd64", "arm64"];
@@ -70,7 +87,7 @@ installRouter.get("/binary/:os/:arch", requireAuth, requireRole("admin", "operat
       "Build with: make agent-linux-amd64 (or the matching target for your platform).",
     ].join(" | "),
   });
-});
+}
 
 // ── GET /api/agents/install/:agentId/:token/install.sh ───────────────────────
 // Returns a fully self-contained bash install script for Linux and macOS.
@@ -134,10 +151,10 @@ echo ""
 
 # ── Download binary ────────────────────────────────────────────────────────
 echo "Downloading agent binary..."
-BINARY_URL="$SERVER/api/agents/binary/$OS/$ARCH"
+BINARY_URL="$SERVER/api/agents/install/$AGENT_ID/$TOKEN/binary/$OS/$ARCH"
 TMP=$(mktemp)
 if command -v curl &>/dev/null; then
-  curl -fsSL -H "X-Install-Token: $TOKEN" -o "$TMP" "$BINARY_URL"
+  curl -fsSL -o "$TMP" "$BINARY_URL"
 elif command -v wget &>/dev/null; then
   wget -qO "$TMP" "$BINARY_URL"
 else
