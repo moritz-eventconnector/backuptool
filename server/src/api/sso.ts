@@ -1,25 +1,46 @@
-// @ts-nocheck — openid-client v6 has breaking API changes; types suppressed until migration
 /**
  * SSO routes: OIDC, SAML 2.0, LDAP
  * Each provider can be configured via environment variables or via the
  * SSO config table (encrypted in DB).
+ *
+ * Migrated to openid-client v6 API.
  */
-import { Router } from "express";
-import { Issuer, generators } from "openid-client";
+import { Router, type Response } from "express";
+import {
+  discovery,
+  buildAuthorizationUrl,
+  authorizationCodeGrant,
+  randomState,
+  randomNonce,
+  type Configuration,
+} from "openid-client";
 import { config } from "../config.js";
 import { getDb } from "../db/index.js";
-import { users, auditLog } from "../db/schema/index.js";
+import { users, auditLog, refreshTokens } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { signAccessToken, refreshTokenTtlMs } from "../auth/jwt.js";
 import { randomToken, sha256 } from "../crypto/encryption.js";
-import { refreshTokens } from "../db/schema/index.js";
 import { logger } from "../logger.js";
 
 export const ssoRouter = Router();
 
 // In-memory OIDC state/nonce store (use Redis in HA setups)
 const pendingOidcStates = new Map<string, { nonce: string; redirectTo: string }>();
+
+// Cache the OIDC configuration so we don't re-discover on every request
+let cachedOidcConfig: Configuration | null = null;
+
+async function getOidcConfig(): Promise<Configuration> {
+  if (!cachedOidcConfig) {
+    cachedOidcConfig = await discovery(
+      new URL(config.oidc.issuerUrl),
+      config.oidc.clientId,
+      config.oidc.clientSecret,
+    );
+  }
+  return cachedOidcConfig;
+}
 
 // ── OIDC ──────────────────────────────────────────────────────────────────────
 
@@ -30,29 +51,23 @@ ssoRouter.get("/oidc/login", async (req, res) => {
   }
 
   try {
-    const issuer = await Issuer.discover(config.oidc.issuerUrl);
-    const client = new issuer.Client({
-      client_id: config.oidc.clientId,
-      client_secret: config.oidc.clientSecret,
-      redirect_uris: [config.oidc.redirectUri],
-      response_types: ["code"],
-    });
+    const oidcCfg = await getOidcConfig();
 
-    const state = generators.state();
-    const nonce = generators.nonce();
+    const state = randomState();
+    const nonce = randomNonce();
     const redirectTo = (req.query.redirect as string) || "/";
 
     pendingOidcStates.set(state, { nonce, redirectTo });
-    // Clean up old states after 10 minutes
     setTimeout(() => pendingOidcStates.delete(state), 10 * 60 * 1000);
 
-    const url = client.authorizationUrl({
+    const url = buildAuthorizationUrl(oidcCfg, {
+      redirect_uri: config.oidc.redirectUri,
       scope: "openid email profile",
       state,
       nonce,
     });
 
-    res.redirect(url);
+    res.redirect(url.href);
   } catch (err) {
     logger.error({ err }, "OIDC login initiation failed");
     res.status(500).json({ error: "OIDC configuration error" });
@@ -74,23 +89,31 @@ ssoRouter.get("/oidc/callback", async (req, res) => {
   pendingOidcStates.delete(state);
 
   try {
-    const issuer = await Issuer.discover(config.oidc.issuerUrl);
-    const client = new issuer.Client({
-      client_id: config.oidc.clientId,
-      client_secret: config.oidc.clientSecret,
-      redirect_uris: [config.oidc.redirectUri],
-      response_types: ["code"],
+    const oidcCfg = await getOidcConfig();
+
+    // Build the full callback URL from the redirect URI base + current query string
+    const callbackUrl = new URL(config.oidc.redirectUri);
+    callbackUrl.search = new URLSearchParams(
+      req.query as Record<string, string>,
+    ).toString();
+
+    const tokens = await authorizationCodeGrant(oidcCfg, callbackUrl, {
+      expectedNonce: pending.nonce,
+      expectedState: state,
+      idTokenExpected: true,
     });
 
-    const params = client.callbackParams(req);
-    const tokenSet = await client.callback(config.oidc.redirectUri, params, {
-      state,
-      nonce: pending.nonce,
-    });
+    const claims = tokens.claims();
+    if (!claims) {
+      res.status(400).json({ error: "No ID token claims received" });
+      return;
+    }
 
-    const claims = tokenSet.claims();
-    const email = claims.email as string;
-    const name = (claims.name as string) || (claims.preferred_username as string) || email;
+    const email = claims.email as string | undefined;
+    const name =
+      (claims.name as string | undefined) ||
+      (claims.preferred_username as string | undefined) ||
+      email;
     const ssoId = claims.sub;
 
     if (!email) {
@@ -98,10 +121,12 @@ ssoRouter.get("/oidc/callback", async (req, res) => {
       return;
     }
 
-    const user = await findOrCreateSsoUser(email, name, "oidc", ssoId, req.ip ?? "");
+    const user = await findOrCreateSsoUser(email, name ?? email, "oidc", ssoId, req.ip ?? "");
     await issueSessionAndRedirect(res, user, pending.redirectTo);
   } catch (err) {
     logger.error({ err }, "OIDC callback failed");
+    // Invalidate cached config on discovery errors so it re-fetches next time
+    cachedOidcConfig = null;
     res.status(500).json({ error: "OIDC authentication failed" });
   }
 });
@@ -123,15 +148,13 @@ ssoRouter.post("/ldap/login", async (req, res) => {
   }
 
   try {
-    // Dynamic import to avoid requiring ldapjs when LDAP is disabled
     const ldap = await import("ldapjs");
     const client = ldap.createClient({ url: config.ldap.url });
 
     // Bind as service account
     await new Promise<void>((resolve, reject) => {
       client.bind(config.ldap.bindDn, config.ldap.bindCredentials, (err) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) reject(err); else resolve();
       });
     });
 
@@ -147,8 +170,7 @@ ssoRouter.post("/ldap/login", async (req, res) => {
             let found: { dn: string; email: string; name: string } | null = null;
             res.on("searchEntry", (entry) => {
               const attrs = entry.pojo.attributes;
-              const get = (name: string) =>
-                attrs.find((a) => a.type === name)?.values[0] ?? "";
+              const get = (name: string) => attrs.find((a) => a.type === name)?.values[0] ?? "";
               found = {
                 dn: entry.pojo.objectName,
                 email: get("mail"),
@@ -157,9 +179,9 @@ ssoRouter.post("/ldap/login", async (req, res) => {
             });
             res.on("error", reject);
             res.on("end", () => resolve(found));
-          }
+          },
         );
-      }
+      },
     );
 
     if (!searchResult) {
@@ -168,11 +190,10 @@ ssoRouter.post("/ldap/login", async (req, res) => {
       return;
     }
 
-    // Bind as the user to verify password
+    // Bind as user to verify password
     await new Promise<void>((resolve, reject) => {
       client.bind(searchResult.dn, password, (err) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) reject(err); else resolve();
       });
     }).catch(() => {
       client.destroy();
@@ -186,7 +207,7 @@ ssoRouter.post("/ldap/login", async (req, res) => {
       searchResult.name,
       "ldap",
       searchResult.dn,
-      req.ip ?? ""
+      req.ip ?? "",
     );
 
     const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role });
@@ -205,7 +226,8 @@ ssoRouter.post("/ldap/login", async (req, res) => {
     });
   } catch (err) {
     logger.error({ err }, "LDAP authentication failed");
-    res.status(401).json({ error: (err as Error).message === "Invalid credentials" ? "Invalid credentials" : "LDAP authentication error" });
+    const msg = (err as Error).message;
+    res.status(401).json({ error: msg === "Invalid credentials" ? msg : "LDAP authentication error" });
   }
 });
 
@@ -216,16 +238,13 @@ async function findOrCreateSsoUser(
   name: string,
   provider: string,
   ssoId: string,
-  ip: string
+  ip: string,
 ) {
   const db = getDb();
-  let [user] = db.select().from(users)
-    .where(eq(users.email, email))
-    .all();
+  let [user] = db.select().from(users).where(eq(users.email, email)).all();
 
   if (!user) {
     const id = nanoid();
-    // First SSO user gets admin role, subsequent get viewer
     const existingCount = db.select().from(users).all().length;
     db.insert(users).values({
       id,
@@ -237,7 +256,6 @@ async function findOrCreateSsoUser(
     }).run();
     [user] = db.select().from(users).where(eq(users.id, id)).all();
   } else if (!user.ssoProvider) {
-    // Link SSO to existing local account
     db.update(users).set({ ssoProvider: provider, ssoId }).where(eq(users.id, user.id)).run();
     [user] = db.select().from(users).where(eq(users.id, user.id)).all();
   }
@@ -253,9 +271,9 @@ async function findOrCreateSsoUser(
 }
 
 async function issueSessionAndRedirect(
-  res: Parameters<(typeof ssoRouter)["get"]>[1],
+  res: Response,
   user: typeof users.$inferSelect,
-  redirectTo: string
+  redirectTo: string,
 ) {
   const db = getDb();
   const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role });
