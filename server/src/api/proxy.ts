@@ -108,8 +108,12 @@ function writeCaddyConfig(opts: {
   const dir = caddyDir();
   fs.mkdirSync(dir, { recursive: true });
 
-  const caddyfile = buildCaddyfile(opts);
-  fs.writeFileSync(path.join(dir, "Caddyfile"), caddyfile, "utf8");
+  const caddyfilePath = path.join(dir, "Caddyfile");
+  // Remove existing file first — it may be owned by root (written by the Caddy
+  // container entrypoint), while the server runs as a non-root user. Directory
+  // write permission lets us unlink the file even without file ownership.
+  try { fs.unlinkSync(caddyfilePath); } catch { /* ignore if not exists */ }
+  fs.writeFileSync(caddyfilePath, caddyfile, "utf8");
 
   if (opts.sslMode === "custom") {
     if (opts.cert) fs.writeFileSync(path.join(dir, "cert.pem"), opts.cert, "utf8");
