@@ -108,6 +108,7 @@ function writeCaddyConfig(opts: {
   const dir = caddyDir();
   fs.mkdirSync(dir, { recursive: true });
 
+  const caddyfile = buildCaddyfile(opts);
   const caddyfilePath = path.join(dir, "Caddyfile");
   // Remove existing file first — it may be owned by root (written by the Caddy
   // container entrypoint), while the server runs as a non-root user. Directory
