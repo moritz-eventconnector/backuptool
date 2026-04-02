@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle, Globe } from "lucide-react";
+import { Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle, Globe, Lock } from "lucide-react";
 import { api, type User } from "../api/client";
 
 export default function Settings() {
@@ -14,6 +14,7 @@ export default function Settings() {
           <nav className="sidebar-nav" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
               { id: "general", label: "General", icon: Globe },
+              { id: "proxy", label: "Proxy / SSL", icon: Lock },
               { id: "notifications", label: "Email", icon: Mail },
               { id: "webhooks", label: "Webhooks", icon: Webhook },
               { id: "sso", label: "SSO / Auth", icon: Shield },
@@ -31,6 +32,7 @@ export default function Settings() {
         </div>
         <div style={{ flex: 1 }}>
           {activeTab === "general" && <GeneralSettings />}
+          {activeTab === "proxy" && <ProxySettings />}
           {activeTab === "notifications" && <NotificationSettings />}
           {activeTab === "webhooks" && <WebhookSettings />}
           {activeTab === "sso" && <SsoSettings />}
@@ -104,6 +106,181 @@ function GeneralSettings() {
 
       <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending} style={{ marginTop: 16 }}>
         {save.isPending ? "Saving…" : "Save"}
+      </button>
+    </div>
+  );
+}
+
+function ProxySettings() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["proxy-config"], queryFn: api.getProxyConfig });
+
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [domain, setDomain] = useState("");
+  const [sslMode, setSslMode] = useState<"off" | "letsencrypt" | "custom">("off");
+  const [letsencryptEmail, setLetsencryptEmail] = useState("");
+  const [allowedIps, setAllowedIps] = useState("");
+  const [cert, setCert] = useState("");
+  const [key, setKey] = useState("");
+
+  if (data && enabled === null) {
+    setEnabled(data.proxyEnabled);
+    setDomain(data.proxyDomain ?? "");
+    setSslMode(data.proxySslMode ?? "off");
+    setLetsencryptEmail(data.proxyLetsencryptEmail ?? "");
+    setAllowedIps((data.proxyAllowedIps ?? []).join("\n"));
+  }
+
+  const save = useMutation({
+    mutationFn: () => api.saveProxyConfig({
+      proxyEnabled: enabled ?? false,
+      proxyDomain: domain || undefined,
+      proxySslMode: sslMode,
+      proxyLetsencryptEmail: letsencryptEmail || undefined,
+      proxyAllowedIps: allowedIps.split("\n").map((s) => s.trim()).filter(Boolean),
+      proxyCert: cert || undefined,
+      proxyKey: key || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["proxy-config"] });
+      setCert("");
+      setKey("");
+    },
+  });
+
+  if (isLoading) return <div className="card"><p style={{ color: "var(--text-muted)" }}>Loading…</p></div>;
+
+  const eff = enabled ?? false;
+
+  return (
+    <div className="card">
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Proxy / SSL</h2>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
+        Caddy reverse proxy with automatic HTTPS. Start the proxy with{" "}
+        <code>docker compose --profile proxy up -d</code>.
+      </p>
+
+      {save.isSuccess && <div className="alert alert-success" style={{ marginBottom: 12 }}>Settings saved. Caddy picks up the new config automatically.</div>}
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 12 }}>{(save.error as Error).message}</div>}
+
+      <div className="form-group" style={{ marginBottom: 16 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "var(--text)" }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={eff} onChange={(e) => setEnabled(e.target.checked)} />
+          Enable Caddy reverse proxy
+        </label>
+      </div>
+
+      {eff && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Domain */}
+          <div className="form-group">
+            <label>Domain</label>
+            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="backup.example.com" />
+            <small style={{ color: "var(--text-muted)", fontSize: 11 }}>
+              Hostname Caddy listens on. Must point to this server's IP via DNS.
+            </small>
+          </div>
+
+          {/* SSL Mode */}
+          <div className="form-group">
+            <label>SSL / TLS mode</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {([
+                { value: "off" as const, label: "HTTP only" },
+                { value: "letsencrypt" as const, label: "Let's Encrypt (auto)" },
+                { value: "custom" as const, label: "Custom certificate" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setSslMode(opt.value)}
+                  className={sslMode === opt.value ? "btn-primary" : "btn-ghost"}
+                  style={{ border: sslMode === opt.value ? undefined : "1px solid var(--border)", fontSize: 12 }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {sslMode === "letsencrypt" && (
+            <div className="form-group">
+              <label>ACME / Let's Encrypt email</label>
+              <input
+                type="email"
+                value={letsencryptEmail}
+                onChange={(e) => setLetsencryptEmail(e.target.value)}
+                placeholder="admin@example.com"
+              />
+              <small style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                Used for expiry notifications and account recovery. Required by Let's Encrypt.
+              </small>
+            </div>
+          )}
+
+          {sslMode === "custom" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="form-group">
+                <label>
+                  Certificate (PEM)
+                  {data?.hasCert && <span style={{ color: "var(--success)", fontSize: 11, marginLeft: 6 }}>✓ cert stored</span>}
+                </label>
+                <textarea
+                  rows={6}
+                  value={cert}
+                  onChange={(e) => setCert(e.target.value)}
+                  placeholder={"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"}
+                  style={{ fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
+                />
+                {data?.hasCert && <small style={{ color: "var(--text-muted)", fontSize: 11 }}>Leave blank to keep the existing certificate.</small>}
+              </div>
+              <div className="form-group">
+                <label>
+                  Private Key (PEM)
+                  {data?.hasKey && <span style={{ color: "var(--success)", fontSize: 11, marginLeft: 6 }}>✓ key stored</span>}
+                </label>
+                <textarea
+                  rows={6}
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  placeholder={"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}
+                  style={{ fontFamily: "monospace", fontSize: 11, resize: "vertical" }}
+                />
+                {data?.hasKey && <small style={{ color: "var(--text-muted)", fontSize: 11 }}>Leave blank to keep the existing key.</small>}
+              </div>
+            </div>
+          )}
+
+          {/* IP Allowlist */}
+          <div className="form-group">
+            <label>IP Allowlist <span style={{ color: "var(--text-muted)", fontSize: 12 }}>(optional)</span></label>
+            <textarea
+              rows={4}
+              value={allowedIps}
+              onChange={(e) => setAllowedIps(e.target.value)}
+              placeholder={"192.168.1.0/24\n10.0.0.0/8\n203.0.113.42"}
+              style={{ fontFamily: "monospace", fontSize: 12, resize: "vertical" }}
+            />
+            <small style={{ color: "var(--text-muted)", fontSize: 11 }}>
+              One CIDR or IP per line. Leave empty to allow all IPs. Requests outside this list receive a 403 response.
+            </small>
+          </div>
+
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            <strong>How it works:</strong> Caddy runs as a separate Docker container (
+            <code>--profile proxy</code>). When you save these settings, the server writes a new{" "}
+            <code>Caddyfile</code> to the shared data volume. Caddy detects the change and reloads
+            automatically — no restart required.
+          </div>
+        </div>
+      )}
+
+      <button
+        className="btn-primary"
+        onClick={() => save.mutate()}
+        disabled={save.isPending}
+        style={{ marginTop: 20 }}
+      >
+        {save.isPending ? "Saving…" : "Save & apply"}
       </button>
     </div>
   );

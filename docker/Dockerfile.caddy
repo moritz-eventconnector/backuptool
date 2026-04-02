@@ -1,0 +1,16 @@
+# Caddy reverse proxy for BackupTool
+# Handles SSL termination (Let's Encrypt or custom cert) and IP allowlisting.
+# Config is written to the shared data volume by the BackupTool server and
+# picked up automatically via Caddy's --watch flag.
+
+FROM caddy:2-alpine
+
+COPY caddy-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Caddy data dir for ACME certificates / state
+VOLUME ["/data/caddy", "/config"]
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/entrypoint.sh"]

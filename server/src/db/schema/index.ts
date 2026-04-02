@@ -154,6 +154,14 @@ export const appConfig = sqliteTable("app_config", {
   releasesBaseUrl: text("releases_base_url"),
   resticBin: text("restic_bin").notNull().default("restic"),
   rcloneBin: text("rclone_bin").notNull().default("rclone"),
+  // ── Caddy reverse proxy / SSL ─────────────────────────────────────────────
+  proxyEnabled: integer("proxy_enabled", { mode: "boolean" }).notNull().default(false),
+  proxyDomain: text("proxy_domain"),               // e.g. backup.example.com
+  proxySslMode: text("proxy_ssl_mode").default("off"), // "off" | "letsencrypt" | "custom"
+  proxyLetsencryptEmail: text("proxy_letsencrypt_email"),
+  proxyAllowedIps: text("proxy_allowed_ips").default("[]"), // JSON array of CIDR strings
+  proxyCertEncrypted: text("proxy_cert_encrypted"), // AES-256-GCM encrypted PEM cert
+  proxyKeyEncrypted: text("proxy_key_encrypted"),   // AES-256-GCM encrypted PEM key
   updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 

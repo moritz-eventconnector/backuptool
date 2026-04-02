@@ -186,6 +186,13 @@ export async function initDb(): Promise<void> {
       releases_base_url TEXT,
       restic_bin TEXT NOT NULL DEFAULT 'restic',
       rclone_bin TEXT NOT NULL DEFAULT 'rclone',
+      proxy_enabled INTEGER NOT NULL DEFAULT 0,
+      proxy_domain TEXT,
+      proxy_ssl_mode TEXT DEFAULT 'off',
+      proxy_letsencrypt_email TEXT,
+      proxy_allowed_ips TEXT DEFAULT '[]',
+      proxy_cert_encrypted TEXT,
+      proxy_key_encrypted TEXT,
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
 
@@ -222,6 +229,13 @@ export async function initDb(): Promise<void> {
     ["releases_base_url", "TEXT"],
     ["restic_bin", "TEXT NOT NULL DEFAULT 'restic'"],
     ["rclone_bin", "TEXT NOT NULL DEFAULT 'rclone'"],
+    ["proxy_enabled", "INTEGER NOT NULL DEFAULT 0"],
+    ["proxy_domain", "TEXT"],
+    ["proxy_ssl_mode", "TEXT DEFAULT 'off'"],
+    ["proxy_letsencrypt_email", "TEXT"],
+    ["proxy_allowed_ips", "TEXT DEFAULT '[]'"],
+    ["proxy_cert_encrypted", "TEXT"],
+    ["proxy_key_encrypted", "TEXT"],
     ["updated_at", "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))"],
   ] as [string, string][]) {
     try { sqlite.exec(`ALTER TABLE app_config ADD COLUMN ${col} ${def};`); } catch { /* exists */ }

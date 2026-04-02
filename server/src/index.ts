@@ -26,6 +26,7 @@ import { settingsRouter } from "./api/settings.js";
 import { installRouter } from "./api/install.js";
 import { appConfigRouter } from "./api/app-config.js";
 import { ssoConfigRouter } from "./api/sso-config.js";
+import { proxyRouter } from "./api/proxy.js";
 
 async function main() {
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ async function main() {
   app.use("/api/settings", settingsRouter);
   app.use("/api/settings", appConfigRouter);
   app.use("/api/settings", ssoConfigRouter);
+  app.use("/api/settings", proxyRouter);
 
   // Health check — available at both /health and /api/health (Docker uses /api/health)
   app.get("/health", (_req, res) => { res.json({ status: "ok", version: "1.0.0" }); });
