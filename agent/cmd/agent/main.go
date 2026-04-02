@@ -263,6 +263,16 @@ func handleConnection(
 				}
 			}()
 
+		case "uninstall":
+			log.Println("Received uninstall command — removing agent from this system...")
+			conn.WriteJSON(map[string]string{"type": "uninstall_ack"})
+			go func() {
+				time.Sleep(500 * time.Millisecond) // let ack reach server
+				uninstallSelf()
+				os.Exit(0)
+			}()
+			return
+
 		case "pong":
 			// heartbeat response — ignore
 
@@ -511,3 +521,29 @@ func ptr[T any](v T) *T { return &v }
 
 // Suppress unused import warning for net/http
 var _ = http.StatusOK
+
+// uninstallSelf stops and removes the agent service and files from the system.
+func uninstallSelf() {
+	bin, _ := os.Executable()
+
+	switch runtime.GOOS {
+	case "linux":
+		exec.Command("systemctl", "stop", "backuptool-agent").Run()
+		exec.Command("systemctl", "disable", "backuptool-agent").Run()
+		os.Remove("/etc/systemd/system/backuptool-agent.service")
+		exec.Command("systemctl", "daemon-reload").Run()
+		fallthrough
+	case "darwin":
+		exec.Command("launchctl", "unload", "/Library/LaunchDaemons/com.backuptool.agent.plist").Run()
+		os.Remove("/Library/LaunchDaemons/com.backuptool.agent.plist")
+		fallthrough
+	default:
+		// Remove binary and config directory
+		if bin != "" {
+			os.Remove(bin)
+		}
+		os.RemoveAll(defaultDataDir())
+	}
+
+	log.Println("Agent uninstalled.")
+}

@@ -40,6 +40,7 @@ Ed25519-signed license files in JWT format for the backuptool product.`,
 	root.AddCommand(keygenCmd())
 	root.AddCommand(generateCmd())
 	root.AddCommand(verifyCmd())
+	root.AddCommand(serveCmd())
 	return root
 }
 

@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
 import { useEffect, useRef, useState } from "react";
 import { config } from "../config.ts";
-import { CheckCircle, XCircle, Clock, Server, Activity } from "lucide-react";
+import { CheckCircle, XCircle, Clock, Server, Activity, Trash2 } from "lucide-react";
 
 interface LiveEvent {
   type: string;
@@ -15,9 +15,14 @@ interface LiveEvent {
 }
 
 export default function Dashboard() {
+  const qc = useQueryClient();
   const { data: agents = [] } = useQuery({ queryKey: ["agents"], queryFn: api.listAgents });
   const { data: snapshots = [] } = useQuery({ queryKey: ["snapshots"], queryFn: () => api.listSnapshots(50) });
   const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
+  const deleteMut = useMutation({
+    mutationFn: api.deleteAgent,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
+  });
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -118,7 +123,13 @@ export default function Dashboard() {
                     <div style={{ fontWeight: 500 }}>{a.name}</div>
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{a.hostname} · {a.os}/{a.arch}</div>
                   </div>
-                  <StatusBadge status={a.status === "busy" ? "running" : a.status as "online" | "offline"} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <StatusBadge status={a.status === "busy" ? "running" : a.status as "online" | "offline"} />
+                    <button className="btn-ghost" style={{ padding: "3px 6px" }}
+                      onClick={() => { if (confirm(`Delete agent "${a.name}"?`)) deleteMut.mutate(a.id); }}>
+                      <Trash2 size={13} color="var(--danger)" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
