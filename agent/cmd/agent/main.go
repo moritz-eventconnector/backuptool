@@ -274,8 +274,8 @@ func handleConnection(
 			}()
 			return
 
-		case "pong":
-			// heartbeat response — ignore
+		case "pong", "ack":
+			// heartbeat / acknowledgement — ignore
 
 		default:
 			log.Printf("Unknown message type: %s", msgType)
