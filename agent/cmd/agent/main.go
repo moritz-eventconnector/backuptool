@@ -91,6 +91,10 @@ func main() {
 		} else {
 			log.Printf("Agent registered and config saved to %s", *configPath)
 		}
+		// Exit after registration — the service manager (systemd/launchd) will
+		// start the agent as a persistent daemon using the saved config.
+		log.Println("Registration complete. The service will start the agent.")
+		return
 	}
 
 	// ── Create mTLS server client ─────────────────────────────────────────────
