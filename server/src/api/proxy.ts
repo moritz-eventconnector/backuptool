@@ -42,13 +42,15 @@ function buildCaddyfile(opts: {
 
   const lines: string[] = [];
 
-  // Global block — only needed for Let's Encrypt email
+  // Global block — always disable auto_https (we manage TLS explicitly),
+  // and add ACME email for Let's Encrypt.
+  lines.push("{");
+  lines.push("    auto_https off");
   if (sslMode === "letsencrypt" && letsencryptEmail) {
-    lines.push("{");
-    lines.push(`  email ${letsencryptEmail}`);
-    lines.push("}");
-    lines.push("");
+    lines.push(`    email ${letsencryptEmail}`);
   }
+  lines.push("}");
+  lines.push("");
 
   // Determine site address + TLS
   // Always serve HTTPS — "off" uses Caddy's internal self-signed cert so cookies

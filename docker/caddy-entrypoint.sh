@@ -13,10 +13,9 @@ mkdir -p "${CADDY_DIR}"
 # the old HTTP-only default (so upgrades switch to HTTPS automatically).
 if [ ! -f "${CADDYFILE}" ] || grep -q "^:80 {" "${CADDYFILE}" 2>/dev/null; then
   cat > "${CADDYFILE}" <<'EOF'
-# Default Caddyfile — replace via Settings → Proxy / SSL in the BackupTool UI.
-# Uses Caddy's internal CA to serve HTTPS immediately (self-signed).
-# Browser will show a one-time security warning — this is expected.
-# Configure a real domain + Let's Encrypt cert in the UI to remove it.
+{
+    auto_https off
+}
 
 :80 {
     redir https://{host}{uri} 308
