@@ -1,10 +1,12 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.tsx";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Server, Briefcase, Camera, HardDrive,
-  Key, Settings, LogOut,
+  Key, Settings, LogOut, AlertTriangle,
 } from "lucide-react";
 import logoFull from "../assets/logo-full.svg";
+import { api } from "../api/client.ts";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -19,6 +21,11 @@ const navItems = [
 export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { data: setupStatus } = useQuery({
+    queryKey: ["setup-status"],
+    queryFn: api.getSetupStatus,
+    enabled: user?.role === "admin",
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -65,8 +72,21 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main style={{ flex: 1, padding: "28px 32px", overflow: "auto" }}>
-        <Outlet />
+      <main style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        {user?.role === "admin" && setupStatus && !setupStatus.setupCompleted && (
+          <div style={{ background: "rgba(245,158,11,.12)", borderBottom: "1px solid rgba(245,158,11,.3)", padding: "8px 24px", display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+            <AlertTriangle size={14} color="var(--warning, #f59e0b)" />
+            <span style={{ color: "var(--warning, #f59e0b)" }}>
+              Setup is not complete.{" "}
+              <button onClick={() => navigate("/onboarding")} style={{ background: "none", border: "none", color: "var(--warning, #f59e0b)", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 13 }}>
+                Continue setup wizard
+              </button>
+            </span>
+          </div>
+        )}
+        <div style={{ flex: 1, padding: "28px 32px" }}>
+          <Outlet />
+        </div>
       </main>
     </div>
   );

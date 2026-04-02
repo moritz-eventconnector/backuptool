@@ -103,6 +103,19 @@ export const api = {
     request<{ message: string }>("/settings/notifications/test", { method: "POST", body: JSON.stringify({ type }) }),
   getSsoStatus: () => request<SsoStatus>("/settings/sso-status"),
 
+  // Settings — App Config
+  getSetupStatus: () => request<{ setupCompleted: boolean }>("/settings/setup-status"),
+  getAppConfig: () => request<AppConfig>("/settings/app-config"),
+  saveAppConfig: (data: Partial<AppConfig>) =>
+    request<{ message: string }>("/settings/app-config", { method: "PUT", body: JSON.stringify(data) }),
+
+  // Settings — SSO Config (DB-backed)
+  getSsoConfig: () => request<SsoProviderRow[]>("/settings/sso"),
+  saveSsoConfig: (provider: "oidc" | "saml" | "ldap", data: { enabled: boolean; config: Record<string, unknown> }) =>
+    request<{ message: string }>(`/settings/sso/${provider}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSsoConfig: (provider: "oidc" | "saml" | "ldap") =>
+    request<{ message: string }>(`/settings/sso/${provider}`, { method: "DELETE" }),
+
   // Settings — Users
   listUsers: () => request<User[]>("/settings/users"),
   createUser: (data: { email: string; name: string; password: string; role: string }) =>
@@ -228,6 +241,22 @@ export interface DiscoveredService {
   postScript: string;
   note: string;
   priority: "critical" | "recommended" | "optional";
+}
+
+export interface AppConfig {
+  serverName: string;
+  serverUrl?: string;
+  setupCompleted: boolean;
+  releasesBaseUrl?: string;
+  resticBin: string;
+  rcloneBin: string;
+}
+
+export interface SsoProviderRow {
+  provider: "oidc" | "saml" | "ldap";
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
 }
 
 export interface LicenseInfo {

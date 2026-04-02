@@ -15,6 +15,7 @@ import {
   type Configuration,
 } from "openid-client";
 import { config } from "../config.js";
+import { getSsoProviderConfig } from "./sso-config.js";
 import { getDb } from "../db/index.js";
 import { users, auditLog, refreshTokens } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
@@ -31,21 +32,57 @@ const pendingOidcStates = new Map<string, { nonce: string; redirectTo: string }>
 // Cache the OIDC configuration so we don't re-discover on every request
 let cachedOidcConfig: Configuration | null = null;
 
+/** Resolve OIDC settings: DB first, env-var fallback */
+function resolveOidcSettings(): { issuerUrl: string; clientId: string; clientSecret?: string; redirectUri: string } | null {
+  const db = getSsoProviderConfig("oidc");
+  if (db?.issuerUrl && db?.clientId) {
+    return {
+      issuerUrl: db.issuerUrl as string,
+      clientId: db.clientId as string,
+      clientSecret: db.clientSecret as string | undefined,
+      redirectUri: (db.redirectUri as string | undefined) ?? `${config.corsOrigin}/api/auth/sso/oidc/callback`,
+    };
+  }
+  if (config.oidc.enabled && config.oidc.issuerUrl && config.oidc.clientId) {
+    return config.oidc;
+  }
+  return null;
+}
+
+/** Resolve LDAP settings: DB first, env-var fallback */
+function resolveLdapSettings(): { url: string; bindDn: string; bindCredentials: string; searchBase: string; searchFilter: string } | null {
+  const db = getSsoProviderConfig("ldap");
+  if (db?.url && db?.bindDn) {
+    return {
+      url: db.url as string,
+      bindDn: db.bindDn as string,
+      bindCredentials: (db.bindCredentials as string | undefined) ?? "",
+      searchBase: (db.searchBase as string | undefined) ?? "dc=example,dc=com",
+      searchFilter: (db.searchFilter as string | undefined) ?? "(mail={{username}})",
+    };
+  }
+  if (config.ldap.enabled) return config.ldap;
+  return null;
+}
+
 async function getOidcConfig(): Promise<Configuration> {
   if (!cachedOidcConfig) {
-    cachedOidcConfig = await discovery(
-      new URL(config.oidc.issuerUrl),
-      config.oidc.clientId,
-      config.oidc.clientSecret,
-    );
+    const s = resolveOidcSettings();
+    if (!s) throw new Error("OIDC not configured");
+    cachedOidcConfig = await discovery(new URL(s.issuerUrl), s.clientId, s.clientSecret);
   }
   return cachedOidcConfig;
+}
+
+export function clearOidcConfigCache(): void {
+  cachedOidcConfig = null;
 }
 
 // ── OIDC ──────────────────────────────────────────────────────────────────────
 
 ssoRouter.get("/oidc/login", async (req, res) => {
-  if (!config.oidc.enabled) {
+  const oidcSettings = resolveOidcSettings();
+  if (!oidcSettings) {
     res.status(404).json({ error: "OIDC SSO is not configured" });
     return;
   }
@@ -60,8 +97,9 @@ ssoRouter.get("/oidc/login", async (req, res) => {
     pendingOidcStates.set(state, { nonce, redirectTo });
     setTimeout(() => pendingOidcStates.delete(state), 10 * 60 * 1000);
 
+    const oidcSettings2 = resolveOidcSettings()!;
     const url = buildAuthorizationUrl(oidcCfg, {
-      redirect_uri: config.oidc.redirectUri,
+      redirect_uri: oidcSettings2.redirectUri,
       scope: "openid email profile",
       state,
       nonce,
@@ -75,7 +113,7 @@ ssoRouter.get("/oidc/login", async (req, res) => {
 });
 
 ssoRouter.get("/oidc/callback", async (req, res) => {
-  if (!config.oidc.enabled) {
+  if (!resolveOidcSettings()) {
     res.status(404).json({ error: "OIDC SSO is not configured" });
     return;
   }
@@ -134,7 +172,8 @@ ssoRouter.get("/oidc/callback", async (req, res) => {
 // ── LDAP ──────────────────────────────────────────────────────────────────────
 
 ssoRouter.post("/ldap/login", async (req, res) => {
-  if (!config.ldap.enabled) {
+  const ldapSettings = resolveLdapSettings();
+  if (!ldapSettings) {
     res.status(404).json({ error: "LDAP is not configured" });
     return;
   }
@@ -149,21 +188,21 @@ ssoRouter.post("/ldap/login", async (req, res) => {
 
   try {
     const ldap = await import("ldapjs");
-    const client = ldap.createClient({ url: config.ldap.url });
+    const client = ldap.createClient({ url: ldapSettings.url });
 
     // Bind as service account
     await new Promise<void>((resolve, reject) => {
-      client.bind(config.ldap.bindDn, config.ldap.bindCredentials, (err) => {
+      client.bind(ldapSettings.bindDn, ldapSettings.bindCredentials, (err) => {
         if (err) reject(err); else resolve();
       });
     });
 
     // Search for user
-    const filter = config.ldap.searchFilter.replace("{{username}}", username);
+    const filter = ldapSettings.searchFilter.replace("{{username}}", username);
     const searchResult = await new Promise<{ dn: string; email: string; name: string } | null>(
       (resolve, reject) => {
         client.search(
-          config.ldap.searchBase,
+          ldapSettings.searchBase,
           { scope: "sub", filter, attributes: ["dn", "mail", "cn", "displayName", "givenName"] },
           (err, res) => {
             if (err) { reject(err); return; }

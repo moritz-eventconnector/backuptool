@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle } from "lucide-react";
+import { Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle, Globe } from "lucide-react";
 import { api, type User } from "../api/client";
 
 export default function Settings() {
@@ -13,7 +13,7 @@ export default function Settings() {
         <div style={{ width: 180, flexShrink: 0 }}>
           <nav className="sidebar-nav" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
-              { id: "general", label: "General", icon: SettingsIcon },
+              { id: "general", label: "General", icon: Globe },
               { id: "notifications", label: "Email", icon: Mail },
               { id: "webhooks", label: "Webhooks", icon: Webhook },
               { id: "sso", label: "SSO / Auth", icon: Shield },
@@ -42,19 +42,69 @@ export default function Settings() {
 }
 
 function GeneralSettings() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["app-config"], queryFn: api.getAppConfig });
+
+  const [serverName, setServerName] = useState<string | null>(null);
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
+  const [resticBin, setResticBin] = useState<string | null>(null);
+  const [rcloneBin, setRcloneBin] = useState<string | null>(null);
+
+  if (data && serverName === null) {
+    setServerName(data.serverName ?? "BackupTool");
+    setServerUrl(data.serverUrl ?? "");
+    setResticBin(data.resticBin ?? "restic");
+    setRcloneBin(data.rcloneBin ?? "rclone");
+  }
+
+  const save = useMutation({
+    mutationFn: () => api.saveAppConfig({
+      serverName: serverName ?? "BackupTool",
+      serverUrl: serverUrl || undefined,
+      resticBin: resticBin ?? "restic",
+      rcloneBin: rcloneBin ?? "rclone",
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["app-config"] }),
+  });
+
+  if (isLoading) return <div className="card"><p style={{ color: "var(--text-muted)" }}>Loading…</p></div>;
+
   return (
     <div className="card">
-      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>General</h2>
-      <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-        General settings are configured via environment variables. See the <code>.env.example</code> file for all available options.
-      </p>
-      <div className="alert alert-info" style={{ marginTop: 16, fontSize: 12 }}>
-        <strong>Key environment variables:</strong><br />
-        <code>PORT</code> — server port (default: 3000)<br />
-        <code>DATA_DIR</code> — data directory (default: ./data)<br />
-        <code>MASTER_SECRET</code> — encryption master secret (required in production)<br />
-        <code>CORS_ORIGIN</code> — allowed CORS origin for the web UI
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>General Settings</h2>
+      {save.isSuccess && <div className="alert alert-success" style={{ marginBottom: 12 }}>Settings saved.</div>}
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 12 }}>{(save.error as Error).message}</div>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="form-group">
+          <label>Server Name</label>
+          <input value={serverName ?? ""} onChange={(e) => setServerName(e.target.value)} placeholder="BackupTool" />
+          <small style={{ color: "var(--text-muted)", fontSize: 11 }}>Display name shown in the UI and notifications</small>
+        </div>
+        <div className="form-group">
+          <label>Server URL <span style={{ color: "var(--text-muted)", fontSize: 12 }}>(optional)</span></label>
+          <input value={serverUrl ?? ""} onChange={(e) => setServerUrl(e.target.value)} placeholder="https://backup.example.com" />
+          <small style={{ color: "var(--text-muted)", fontSize: 11 }}>Public URL used for SSO callbacks and install scripts</small>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group">
+            <label>Restic binary path</label>
+            <input value={resticBin ?? ""} onChange={(e) => setResticBin(e.target.value)} placeholder="restic" />
+          </div>
+          <div className="form-group">
+            <label>Rclone binary path</label>
+            <input value={rcloneBin ?? ""} onChange={(e) => setRcloneBin(e.target.value)} placeholder="rclone" />
+          </div>
+        </div>
       </div>
+
+      <div className="alert alert-info" style={{ marginTop: 16, fontSize: 12 }}>
+        Only <code>MASTER_SECRET</code>, <code>DATA_DIR</code>, and <code>PORT</code> must be set as environment variables. All other configuration is stored in the database.
+      </div>
+
+      <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending} style={{ marginTop: 16 }}>
+        {save.isPending ? "Saving…" : "Save"}
+      </button>
     </div>
   );
 }
@@ -294,90 +344,175 @@ function WebhookSettings() {
 }
 
 function SsoSettings() {
-  const { data } = useQuery({ queryKey: ["sso-status"], queryFn: api.getSsoStatus });
+  const qc = useQueryClient();
+  const { data: rows = [], isLoading } = useQuery({ queryKey: ["sso-config"], queryFn: api.getSsoConfig });
+  const [expanded, setExpanded] = useState<"oidc" | "saml" | "ldap" | null>(null);
 
-  const providers = [
-    {
-      key: "oidc" as const,
-      label: "OIDC (OpenID Connect)",
-      hint: "Google, Azure AD, Okta, Keycloak",
-      vars: "OIDC_ENABLED, OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET",
-      detail: data ? [
-        { label: "Issuer", value: data.oidc.issuerUrl },
-        { label: "Client ID", value: data.oidc.clientId },
-        { label: "Redirect URI", value: data.oidc.redirectUri },
-      ] : [],
-      enabled: data?.oidc.enabled ?? false,
-    },
-    {
-      key: "saml" as const,
-      label: "SAML 2.0",
-      hint: "ADFS, enterprise IdPs",
-      vars: "SAML_ENABLED, SAML_ENTRY_POINT, SAML_CERT, SAML_ISSUER",
-      detail: data ? [
-        { label: "Entry Point", value: data.saml.entryPoint },
-        { label: "Issuer", value: data.saml.issuer },
-        { label: "Callback URL", value: data.saml.callbackUrl },
-      ] : [],
-      enabled: data?.saml.enabled ?? false,
-    },
-    {
-      key: "ldap" as const,
-      label: "LDAP / Active Directory",
-      hint: "On-premise directory",
-      vars: "LDAP_ENABLED, LDAP_URL, LDAP_BIND_DN, LDAP_BIND_CREDENTIALS, LDAP_SEARCH_BASE",
-      detail: data ? [
-        { label: "URL", value: data.ldap.url },
-        { label: "Search Base", value: data.ldap.searchBase },
-        { label: "Search Filter", value: data.ldap.searchFilter },
-      ] : [],
-      enabled: data?.ldap.enabled ?? false,
-    },
+  const getRow = (p: "oidc" | "saml" | "ldap") => rows.find((r) => r.provider === p);
+
+  const deleteMut = useMutation({
+    mutationFn: (p: "oidc" | "saml" | "ldap") => api.deleteSsoConfig(p),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sso-config"] }); setExpanded(null); },
+  });
+
+  const PROVIDERS: { key: "oidc" | "saml" | "ldap"; label: string; hint: string }[] = [
+    { key: "oidc", label: "OIDC (OpenID Connect)", hint: "Google, Azure AD, Okta, Keycloak" },
+    { key: "saml", label: "SAML 2.0", hint: "ADFS, enterprise IdPs" },
+    { key: "ldap", label: "LDAP / Active Directory", hint: "On-premise directory" },
   ];
+
+  if (isLoading) return <div className="card"><p style={{ color: "var(--text-muted)" }}>Loading…</p></div>;
 
   return (
     <div className="card">
       <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Single Sign-On</h2>
       <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
-        SSO is configured via environment variables — not stored in the database.
-        Set the variables below and restart the server.
+        Configure identity providers. Credentials are encrypted in the database.
+        Login endpoints: <code>/api/auth/sso/oidc/login</code> · <code>/api/auth/sso/ldap/login</code>
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {providers.map((p) => (
-          <div key={p.key} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px 14px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: p.enabled ? 10 : 0 }}>
-              {p.enabled
-                ? <CheckCircle size={14} color="var(--success)" />
-                : <XCircle size={14} color="var(--text-muted)" />}
-              <span style={{ fontWeight: 500, fontSize: 13 }}>{p.label}</span>
-              <span style={{ color: "var(--text-muted)", fontSize: 12 }}>— {p.hint}</span>
-              <span className={`badge ${p.enabled ? "badge-success" : "badge-muted"}`} style={{ marginLeft: "auto", fontSize: 11 }}>
-                {p.enabled ? "Enabled" : "Disabled"}
-              </span>
+        {PROVIDERS.map((p) => {
+          const row = getRow(p.key);
+          const isOpen = expanded === p.key;
+          return (
+            <div key={p.key} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px" }}>
+                {row?.enabled
+                  ? <CheckCircle size={14} color="var(--success)" />
+                  : <XCircle size={14} color="var(--text-muted)" />}
+                <span style={{ fontWeight: 500, fontSize: 13 }}>{p.label}</span>
+                <span style={{ color: "var(--text-muted)", fontSize: 12 }}>— {p.hint}</span>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  <span className={`badge ${row?.enabled ? "badge-success" : "badge-muted"}`} style={{ fontSize: 11 }}>
+                    {row?.enabled ? "Enabled" : "Not configured"}
+                  </span>
+                  <button className="btn-ghost" style={{ padding: "3px 8px", fontSize: 12, border: "1px solid var(--border)" }}
+                    onClick={() => setExpanded(isOpen ? null : p.key)}>
+                    {isOpen ? "Close" : row ? "Edit" : "Configure"}
+                  </button>
+                  {row && !isOpen && (
+                    <button className="btn-ghost" style={{ padding: "3px 8px", fontSize: 12, color: "var(--error)" }}
+                      onClick={() => { if (confirm(`Remove ${p.label} configuration?`)) deleteMut.mutate(p.key); }}>
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {isOpen && (
+                <div style={{ borderTop: "1px solid var(--border)", padding: "14px 14px" }}>
+                  {p.key === "oidc" && <OidcForm existing={row?.config} onSaved={() => { qc.invalidateQueries({ queryKey: ["sso-config"] }); setExpanded(null); }} />}
+                  {p.key === "saml" && <SamlForm existing={row?.config} onSaved={() => { qc.invalidateQueries({ queryKey: ["sso-config"] }); setExpanded(null); }} />}
+                  {p.key === "ldap" && <LdapForm existing={row?.config} onSaved={() => { qc.invalidateQueries({ queryKey: ["sso-config"] }); setExpanded(null); }} />}
+                </div>
+              )}
             </div>
-            {p.enabled && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {p.detail.map((d) => d.value && (
-                  <div key={d.label} style={{ display: "flex", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
-                    <span style={{ minWidth: 90 }}>{d.label}</span>
-                    <code style={{ color: "var(--text)" }}>{d.value}</code>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!p.enabled && (
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
-                Set <code>{p.vars.split(",")[0].trim()}=true</code> to enable.
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
+    </div>
+  );
+}
 
-      <div className="alert alert-info" style={{ fontSize: 12, marginTop: 16 }}>
-        See <code>.env.example</code> for all available <code>OIDC_*</code>, <code>SAML_*</code>, and <code>LDAP_*</code> variables.
-        Login endpoints: <code>/api/auth/sso/oidc/login</code> · <code>/api/auth/sso/ldap/login</code>
+function OidcForm({ existing, onSaved }: { existing?: Record<string, unknown>; onSaved: () => void }) {
+  const [issuerUrl, setIssuerUrl] = useState((existing?.issuerUrl as string) ?? "");
+  const [clientId, setClientId] = useState((existing?.clientId as string) ?? "");
+  const [clientSecret, setClientSecret] = useState("");
+  const [redirectUri, setRedirectUri] = useState((existing?.redirectUri as string) ?? "");
+  const [enabled, setEnabled] = useState(true);
+  const save = useMutation({
+    mutationFn: () => api.saveSsoConfig("oidc", {
+      enabled,
+      config: { issuerUrl, clientId, clientSecret: clientSecret || undefined, redirectUri: redirectUri || undefined },
+    }),
+    onSuccess: onSaved,
+  });
+  return (
+    <div>
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 10 }}>{(save.error as Error).message}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="form-group"><label>Issuer URL</label><input value={issuerUrl} onChange={(e) => setIssuerUrl(e.target.value)} placeholder="https://accounts.google.com" /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="form-group"><label>Client ID</label><input value={clientId} onChange={(e) => setClientId(e.target.value)} /></div>
+          <div className="form-group"><label>Client Secret {existing && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>(leave blank to keep existing)</span>}</label><input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="••••••••" /></div>
+        </div>
+        <div className="form-group"><label>Redirect URI <span style={{ color: "var(--text-muted)", fontSize: 11 }}>(optional)</span></label><input value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} placeholder="/api/auth/sso/oidc/callback" /></div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, color: "var(--text)" }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled
+        </label>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+function SamlForm({ existing, onSaved }: { existing?: Record<string, unknown>; onSaved: () => void }) {
+  const [entryPoint, setEntryPoint] = useState((existing?.entryPoint as string) ?? "");
+  const [issuer, setIssuer] = useState((existing?.issuer as string) ?? "backuptool");
+  const [cert, setCert] = useState("");
+  const [callbackUrl, setCallbackUrl] = useState((existing?.callbackUrl as string) ?? "");
+  const [enabled, setEnabled] = useState(true);
+  const save = useMutation({
+    mutationFn: () => api.saveSsoConfig("saml", {
+      enabled,
+      config: { entryPoint, issuer, cert: cert || undefined, callbackUrl: callbackUrl || undefined },
+    }),
+    onSuccess: onSaved,
+  });
+  return (
+    <div>
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 10 }}>{(save.error as Error).message}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="form-group"><label>Entry Point URL</label><input value={entryPoint} onChange={(e) => setEntryPoint(e.target.value)} placeholder="https://idp.example.com/sso/saml" /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="form-group"><label>Issuer</label><input value={issuer} onChange={(e) => setIssuer(e.target.value)} /></div>
+          <div className="form-group"><label>Callback URL <span style={{ color: "var(--text-muted)", fontSize: 11 }}>(optional)</span></label><input value={callbackUrl} onChange={(e) => setCallbackUrl(e.target.value)} /></div>
+        </div>
+        <div className="form-group"><label>IdP Certificate (PEM) {existing && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>(leave blank to keep existing)</span>}</label><textarea rows={4} value={cert} onChange={(e) => setCert(e.target.value)} placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style={{ fontFamily: "monospace", fontSize: 11, resize: "vertical" }} /></div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, color: "var(--text)" }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled
+        </label>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+function LdapForm({ existing, onSaved }: { existing?: Record<string, unknown>; onSaved: () => void }) {
+  const [url, setUrl] = useState((existing?.url as string) ?? "");
+  const [bindDn, setBindDn] = useState((existing?.bindDn as string) ?? "");
+  const [bindCredentials, setBindCredentials] = useState("");
+  const [searchBase, setSearchBase] = useState((existing?.searchBase as string) ?? "dc=example,dc=com");
+  const [searchFilter, setSearchFilter] = useState((existing?.searchFilter as string) ?? "(mail={{username}})");
+  const [enabled, setEnabled] = useState(true);
+  const save = useMutation({
+    mutationFn: () => api.saveSsoConfig("ldap", {
+      enabled,
+      config: { url, bindDn, bindCredentials: bindCredentials || undefined, searchBase, searchFilter },
+    }),
+    onSuccess: onSaved,
+  });
+  return (
+    <div>
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 10 }}>{(save.error as Error).message}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="form-group"><label>LDAP URL</label><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="ldap://ldap.example.com:389" /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="form-group"><label>Bind DN</label><input value={bindDn} onChange={(e) => setBindDn(e.target.value)} placeholder="cn=admin,dc=example,dc=com" /></div>
+          <div className="form-group"><label>Bind Password {existing && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>(leave blank to keep)</span>}</label><input type="password" value={bindCredentials} onChange={(e) => setBindCredentials(e.target.value)} placeholder="••••••••" /></div>
+        </div>
+        <div className="form-group"><label>Search Base</label><input value={searchBase} onChange={(e) => setSearchBase(e.target.value)} /></div>
+        <div className="form-group"><label>Search Filter</label><input value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} /><small style={{ color: "var(--text-muted)", fontSize: 11 }}>Use {"{{username}}"} as placeholder</small></div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, color: "var(--text)" }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled
+        </label>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button>
       </div>
     </div>
   );

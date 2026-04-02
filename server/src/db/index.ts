@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema/index.js";
+import { eq } from "drizzle-orm";
 import { config } from "../config.js";
 import fs from "fs";
 import path from "path";
@@ -177,6 +178,17 @@ export async function initDb(): Promise<void> {
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
 
+    CREATE TABLE IF NOT EXISTS app_config (
+      id TEXT PRIMARY KEY DEFAULT 'singleton',
+      server_name TEXT NOT NULL DEFAULT 'BackupTool',
+      server_url TEXT,
+      setup_completed INTEGER NOT NULL DEFAULT 0,
+      releases_base_url TEXT,
+      restic_bin TEXT NOT NULL DEFAULT 'restic',
+      rclone_bin TEXT NOT NULL DEFAULT 'rclone',
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    );
+
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -195,6 +207,25 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
   `);
+
+  // Ensure app_config singleton row exists
+  const existing = db.select({ id: schema.appConfig.id }).from(schema.appConfig).all();
+  if (existing.length === 0) {
+    db.insert(schema.appConfig).values({ id: "singleton" }).run();
+  }
+
+  // Add app_config columns for existing databases
+  for (const [col, def] of [
+    ["server_name", "TEXT NOT NULL DEFAULT 'BackupTool'"],
+    ["server_url", "TEXT"],
+    ["setup_completed", "INTEGER NOT NULL DEFAULT 0"],
+    ["releases_base_url", "TEXT"],
+    ["restic_bin", "TEXT NOT NULL DEFAULT 'restic'"],
+    ["rclone_bin", "TEXT NOT NULL DEFAULT 'rclone'"],
+    ["updated_at", "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))"],
+  ] as [string, string][]) {
+    try { sqlite.exec(`ALTER TABLE app_config ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
+  }
 
   // Add discovered_services column to agents for existing databases.
   try { sqlite.exec(`ALTER TABLE agents ADD COLUMN discovered_services TEXT;`); } catch { /* exists */ }
