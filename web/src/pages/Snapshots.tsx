@@ -39,7 +39,7 @@ export default function Snapshots() {
       {/* Restore Dialog */}
       {restoreDialog && (() => {
         const dialogJob = jobs.find((j) => j.id === restoreDialog.jobId);
-        const sourcePaths: string[] = dialogJob?.sourcePaths ? JSON.parse(dialogJob.sourcePaths as string) : [];
+        const sourcePaths: string[] = dialogJob?.sourcePaths ?? [];
         const effectivePath = restoreMode === "original" ? "/" : restorePath;
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
