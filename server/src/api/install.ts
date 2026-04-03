@@ -220,13 +220,11 @@ echo "Registering agent..."
        --config "$DATA_DIR/agent.yaml"
 echo "  Registration complete."
 
-# ── Linux: create service user + systemd unit ─────────────────────────────
-if [ "$OS" = "linux" ] && command -v systemctl &>/dev/null; then
-  if ! id "$SERVICE_USER" &>/dev/null; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null || true
-  fi
-  chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+# ── Create default local repo directory (always writable) ─────────────────
+mkdir -p "$DATA_DIR/repos"
 
+# ── Linux: systemd unit (runs as root so it can read all source files) ────
+if [ "$OS" = "linux" ] && command -v systemctl &>/dev/null; then
   cat > /etc/systemd/system/backuptool-agent.service <<EOF
 [Unit]
 Description=BackupTool Backup Agent
@@ -236,18 +234,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
+User=root
 ExecStart=$BIN --server $SERVER --config $DATA_DIR/agent.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=backuptool-agent
-# Security hardening — runs as unprivileged system user; no privilege escalation allowed.
-# ProtectSystem/ProtectHome are intentionally NOT set so the agent can read source paths
-# (e.g. /etc, /var/lib/...) and write to local backup destinations anywhere on the filesystem.
-# Unix permissions on the backuptool user remain the security boundary.
-NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
