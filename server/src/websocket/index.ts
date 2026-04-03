@@ -159,6 +159,102 @@ export function initWebSocket(server: Server): WebSocketServer {
           return;
         }
 
+        if (msg.type === "check_result") {
+          const db = getDb();
+          const snapshotId = msg.snapshotId as string;
+          const checkStatus = msg.status as string; // "passed" | "failed"
+          const checkMessage = (msg.message as string) ?? "";
+          const destinationId = msg.destinationId as string;
+
+          if (snapshotId) {
+            // Store check result as a snapshot log entry
+            db.insert(snapshotLogs).values({
+              id: nanoid(),
+              snapshotId,
+              level: checkStatus === "passed" ? "info" : "error",
+              message: checkStatus === "passed"
+                ? `Integrity check passed${destinationId ? ` (dest: ${destinationId.slice(0, 8)})` : ""}`
+                : `Integrity check FAILED: ${checkMessage}`,
+            }).run();
+
+            // Persist check status on the snapshot row
+            db.update(snapshots)
+              .set({ integrityCheckStatus: checkStatus })
+              .where(eq(snapshots.id, snapshotId))
+              .run();
+
+            // Send notification on check failure (use existing email/webhook infra)
+            if (checkStatus === "failed") {
+              try {
+                const [notifRow] = db.select().from(notificationSettings).all();
+                if (notifRow?.emailEnabled && notifRow.notifyOnFailure) {
+                  const recipients: string[] = JSON.parse(notifRow.emailRecipients ?? "[]");
+                  if (recipients.length > 0) {
+                    const [snap] = db.select().from(snapshots).where(eq(snapshots.id, snapshotId)).all();
+                    const [job] = snap?.jobId
+                      ? db.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all()
+                      : [];
+                    const [agentRow] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).all();
+                    let smtpPass: string | undefined;
+                    if (notifRow.smtpPassEncrypted) {
+                      try { smtpPass = decrypt(notifRow.smtpPassEncrypted); } catch { /* ignore */ }
+                    }
+                    sendBackupNotification(recipients, {
+                      jobName: job?.name ?? snap?.jobId ?? "unknown",
+                      agentName: agentRow?.name ?? agentId,
+                      status: "failed",
+                      startedAt: snap?.startedAt ?? new Date().toISOString(),
+                      errorMessage: `Repository integrity check failed: ${checkMessage}`,
+                      snapshotId,
+                    }, {
+                      smtpHost: notifRow.smtpHost,
+                      smtpPort: notifRow.smtpPort,
+                      smtpUser: notifRow.smtpUser,
+                      smtpFrom: notifRow.smtpFrom,
+                      smtpPass,
+                    }).catch((err) => logger.error({ err }, "Integrity check alert email failed"));
+                  }
+                }
+              } catch (err) {
+                logger.error({ err }, "Error sending integrity check failure notification");
+              }
+
+              // Webhook
+              try {
+                const [notifRow] = db.select().from(notificationSettings).all();
+                if (notifRow?.webhookEnabled && notifRow.webhookUrl && notifRow.webhookOnFailure) {
+                  const [snap] = db.select().from(snapshots).where(eq(snapshots.id, snapshotId)).all();
+                  const [job] = snap?.jobId
+                    ? db.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all()
+                    : [];
+                  const [agentRow] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).all();
+                  const { sendWebhookNotification } = await import("../notifications/webhook.js");
+                  sendWebhookNotification(
+                    notifRow.webhookUrl,
+                    (notifRow.webhookType ?? "generic") as import("../notifications/webhook.js").WebhookType,
+                    {
+                      jobName: job?.name ?? snap?.jobId ?? "unknown",
+                      agentName: agentRow?.name ?? agentId,
+                      status: "failed",
+                      startedAt: snap?.startedAt ?? new Date().toISOString(),
+                      errorMessage: `Repository integrity check failed: ${checkMessage}`,
+                      snapshotId,
+                    },
+                  ).catch((err) => logger.error({ err }, "Integrity check webhook failed"));
+                }
+              } catch (err) {
+                logger.error({ err }, "Error sending integrity check webhook");
+              }
+
+              logger.error({ agentId, snapshotId, checkMessage }, "Integrity check FAILED");
+            } else {
+              logger.info({ agentId, snapshotId }, "Integrity check passed");
+            }
+          }
+          broadcastToUi({ type: "check_result", agentId, ...msg });
+          return;
+        }
+
         if (msg.type === "snapshot_done") {
           const db = getDb();
           const snapshotId = msg.snapshotId as string;

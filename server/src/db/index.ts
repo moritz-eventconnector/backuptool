@@ -252,6 +252,9 @@ export async function initDb(): Promise<void> {
     try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
   }
 
+  // Add integrity_check_status column to snapshots for existing databases.
+  try { sqlite.exec(`ALTER TABLE snapshots ADD COLUMN integrity_check_status TEXT;`); } catch { /* exists */ }
+
   // Add webhook columns to notification_settings for existing databases.
   // SQLite does not support "ADD COLUMN IF NOT EXISTS", so we catch the error.
   const webhookCols: [string, string][] = [

@@ -381,6 +381,39 @@ func runBackup(ctx context.Context, conn *websocket.Conn, runner *backup.Runner,
 	}
 
 	sendSnapshotDone(conn, snapshotID, lastResult.Status, lastResult, lastResult.ErrorMessage)
+
+	// Run restic check integrity verification asynchronously after a successful backup.
+	// This does not block the snapshot_done message and runs in the background.
+	if lastResult.Status == "success" {
+		go func() {
+			for _, d := range job.Destinations {
+				dest := &backup.Destination{
+					ID:     d.ID,
+					Name:   d.Name,
+					Type:   d.Type,
+					Config: d.Config,
+				}
+				log.Printf("Running integrity check for job %s, dest %s...", job.ID, d.ID)
+				checkErr := runner.Check(ctx, dest, job.ResticPassword)
+				checkStatus := "passed"
+				checkMsg := ""
+				if checkErr != nil {
+					checkStatus = "failed"
+					checkMsg = checkErr.Error()
+					log.Printf("Integrity check FAILED for job %s dest %s: %v", job.ID, d.ID, checkErr)
+				} else {
+					log.Printf("Integrity check passed for job %s dest %s", job.ID, d.ID)
+				}
+				conn.WriteJSON(map[string]interface{}{
+					"type":          "check_result",
+					"snapshotId":    snapshotID,
+					"destinationId": d.ID,
+					"status":        checkStatus,
+					"message":       checkMsg,
+				})
+			}
+		}()
+	}
 }
 
 func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, restorePath, destinationID string) error {

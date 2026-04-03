@@ -10,8 +10,15 @@ import { encrypt, randomToken, decrypt } from "../crypto/encryption.js";
 import { sendBackupNotification } from "../notifications/email.js";
 import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
 import { logger } from "../logger.js";
+import { checkOverdueBackups } from "../alerts/overdue.js";
 
 export const jobsRouter = Router();
+
+// GET /api/jobs/overdue — returns jobs that have missed their schedule
+jobsRouter.get("/overdue", requireAuth, async (_req, res) => {
+  const overdue = await checkOverdueBackups();
+  res.json(overdue);
+});
 
 const retentionSchema = z.object({
   keepLast: z.number().int().min(0).optional(),

@@ -251,6 +251,24 @@ func (r *Runner) ListFiles(ctx context.Context, dest *Destination, resticSnapsho
 	return files, nil
 }
 
+// Check runs restic check to verify repository data integrity.
+// It should be called after a successful backup to detect any corruption.
+func (r *Runner) Check(ctx context.Context, dest *Destination, password string) error {
+	repoURL, env, err := r.buildRepoURLAndEnv(dest)
+	if err != nil {
+		return err
+	}
+	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
+
+	cmd := exec.CommandContext(ctx, r.ResticBin, "check")
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("restic check failed: %v\n%s", err, string(out))
+	}
+	return nil
+}
+
 // ForgetSnapshot removes a single snapshot from the repository.
 func (r *Runner) ForgetSnapshot(ctx context.Context, dest *Destination, resticSnapshotID, password string) error {
 	repoURL, env, err := r.buildRepoURLAndEnv(dest)
