@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Job, type DiscoveredService } from "../api/client.ts";
-import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles } from "lucide-react";
+import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp } from "lucide-react";
 
 export default function Jobs() {
   const qc = useQueryClient();
@@ -114,7 +114,46 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
     queryFn: () => api.getDiscoveredServices(agentId),
     enabled: !!agentId && !job,
   });
-  const [sourcePaths, setSourcePaths] = useState(job?.sourcePaths.join("\n") ?? "");
+  // Discovery multi-select
+  const [selectedSvcs, setSelectedSvcs] = useState<DiscoveredService[]>([]);
+  const [svcFilter, setSvcFilter] = useState<string>("all");
+  const [showAllSvcs, setShowAllSvcs] = useState(false);
+  const [extraPaths, setExtraPaths] = useState(job?.sourcePaths.join("\n") ?? "");
+
+  // Combine paths from selected services + manually added paths (deduplicated)
+  const combinedPaths = useMemo(() => {
+    const fromSvcs = selectedSvcs.flatMap((s) => s.sourcePaths);
+    const manual = extraPaths.split("\n").map((p) => p.trim()).filter(Boolean);
+    return [...new Set([...fromSvcs, ...manual])];
+  }, [selectedSvcs, extraPaths]);
+
+  const combinedPreScript = useMemo(() =>
+    selectedSvcs.filter((s) => s.preScript).map((s) => `# === ${s.name} ===\n${s.preScript}`).join("\n\n"),
+    [selectedSvcs]);
+
+  const combinedPostScript = useMemo(() =>
+    selectedSvcs.filter((s) => s.postScript).map((s) => `# === ${s.name} ===\n${s.postScript}`).join("\n\n"),
+    [selectedSvcs]);
+
+  const toggleSvc = (svc: DiscoveredService) => {
+    setSelectedSvcs((prev) => {
+      const isSelected = prev.some((s) => s.name === svc.name);
+      const next = isSelected ? prev.filter((s) => s.name !== svc.name) : [...prev, svc];
+      if (next.length === 1 && !name) setName(next[0].name);
+      return next;
+    });
+  };
+
+  const svcTypes = useMemo(() => {
+    const types = new Set(discoveredServices.map((s) => s.type));
+    return ["all", ...Array.from(types)];
+  }, [discoveredServices]);
+
+  const visibleSvcs = useMemo(() => {
+    const filtered = svcFilter === "all" ? discoveredServices : discoveredServices.filter((s) => s.type === svcFilter);
+    return showAllSvcs ? filtered : filtered.slice(0, 12);
+  }, [discoveredServices, svcFilter, showAllSvcs]);
+
   const [destIds, setDestIds] = useState<string[]>(job?.destinationIds ?? []);
   const [schedule, setSchedule] = useState(job?.schedule ?? "");
   const [keepLast, setKeepLast] = useState(job?.retention?.keepLast?.toString() ?? "10");
@@ -130,13 +169,6 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const applyDiscovered = (svc: DiscoveredService) => {
-    if (!name) setName(svc.name);
-    setSourcePaths(svc.sourcePaths.join("\n"));
-    if (svc.preScript) setPreScript(svc.preScript);
-    if (svc.postScript) setPostScript(svc.postScript);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -144,9 +176,11 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
     if (destIds.length === 0) { setError("Please select at least one destination"); return; }
     setLoading(true);
     try {
+      const effectivePre = selectedSvcs.length > 0 ? combinedPreScript : preScript;
+      const effectivePost = selectedSvcs.length > 0 ? combinedPostScript : postScript;
       const data = {
         agentId, name,
-        sourcePaths: sourcePaths.split("\n").map((s) => s.trim()).filter(Boolean),
+        sourcePaths: job ? extraPaths.split("\n").map((s) => s.trim()).filter(Boolean) : combinedPaths,
         destinationIds: destIds,
         schedule: schedule || undefined,
         retention: {
@@ -155,8 +189,8 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
           keepWeekly: parseInt(keepWeekly) || undefined,
           keepMonthly: parseInt(keepMonthly) || undefined,
         },
-        preScript: preScript || undefined,
-        postScript: postScript || undefined,
+        preScript: effectivePre || undefined,
+        postScript: effectivePost || undefined,
         excludePatterns: excludePatterns.split("\n").map((s) => s.trim()).filter(Boolean),
         enabled,
         wormEnabled,
@@ -197,34 +231,100 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
               <input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 2 * * * (daily at 2am)" />
             </div>
             {!job && discoveredServices.length > 0 && (
-              <div style={{ gridColumn: "1/-1", marginBottom: 4 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 13 }}>
-                  <Sparkles size={13} color="var(--primary)" />
-                  <span style={{ color: "var(--primary)", fontWeight: 500 }}>Auto-discovered services</span>
-                  <span style={{ color: "var(--text-muted)" }}>— click to pre-fill</span>
+              <div style={{ gridColumn: "1/-1" }}>
+                {/* Header + type filter */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13 }}>
+                    <Sparkles size={13} color="var(--primary)" />
+                    <span style={{ color: "var(--primary)", fontWeight: 500 }}>Auto-discovered</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {svcTypes.map((t) => (
+                      <button key={t} type="button"
+                        className={svcFilter === t ? "btn-primary" : "btn-ghost"}
+                        style={{ fontSize: 11, padding: "2px 8px", textTransform: "capitalize" }}
+                        onClick={() => setSvcFilter(t)}>{t}</button>
+                    ))}
+                  </div>
+                  {selectedSvcs.length > 0 && (
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-muted)" }}>
+                      {selectedSvcs.length} selected · {combinedPaths.length} paths
+                    </span>
+                  )}
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {discoveredServices.map((svc) => (
-                    <button
-                      key={svc.name}
-                      type="button"
-                      className="btn-ghost"
-                      style={{ fontSize: 12, padding: "4px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius)", display: "flex", alignItems: "center", gap: 5 }}
-                      title={svc.note || svc.type}
-                      onClick={() => applyDiscovered(svc)}
-                    >
-                      <span className={`badge ${svc.priority === "critical" ? "badge-danger" : svc.priority === "recommended" ? "badge-primary" : "badge-muted"}`} style={{ fontSize: 10, padding: "1px 5px" }}>
-                        {svc.priority}
+
+                {/* Service grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 5, marginBottom: 8 }}>
+                  {visibleSvcs.map((svc) => {
+                    const sel = selectedSvcs.some((s) => s.name === svc.name);
+                    return (
+                      <button key={svc.name} type="button"
+                        title={svc.note || svc.sourcePaths.join(", ")}
+                        onClick={() => toggleSvc(svc)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 6, padding: "6px 10px",
+                          borderRadius: "var(--radius)", fontSize: 12, textAlign: "left",
+                          background: sel ? "var(--primary-subtle, rgba(99,102,241,.15))" : "var(--bg)",
+                          border: `1px solid ${sel ? "var(--primary)" : "var(--border)"}`,
+                          color: sel ? "var(--primary)" : "var(--text-secondary)",
+                          cursor: "pointer", transition: "all .12s",
+                        }}>
+                        <span style={{
+                          width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                          background: svc.priority === "critical" ? "var(--danger)" : svc.priority === "recommended" ? "var(--primary)" : "var(--text-muted)",
+                        }} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{svc.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Show more / less */}
+                {(svcFilter === "all" ? discoveredServices : discoveredServices.filter((s) => s.type === svcFilter)).length > 12 && (
+                  <button type="button" className="btn-ghost" style={{ fontSize: 12, padding: "2px 8px", marginBottom: 8 }}
+                    onClick={() => setShowAllSvcs((v) => !v)}>
+                    {showAllSvcs ? <><ChevronUp size={11} /> Show less</> : <><ChevronDown size={11} /> Show all ({discoveredServices.length})</>}
+                  </button>
+                )}
+
+                {/* Selected chips */}
+                {selectedSvcs.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                    {selectedSvcs.map((svc) => (
+                      <span key={svc.name} style={{
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        background: "var(--primary-subtle, rgba(99,102,241,.15))",
+                        border: "1px solid var(--primary)", borderRadius: "var(--radius)",
+                        padding: "2px 8px", fontSize: 12, color: "var(--primary)",
+                      }}>
+                        {svc.name}
+                        <button type="button" onClick={() => toggleSvc(svc)}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", color: "inherit" }}>
+                          <X size={11} />
+                        </button>
                       </span>
-                      {svc.name}
-                    </button>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Combined paths preview */}
+                {selectedSvcs.length > 0 && (
+                  <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "8px 10px", marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 5 }}>PATHS TO BACK UP ({combinedPaths.length})</div>
+                    {combinedPaths.map((p) => (
+                      <div key={p} style={{ fontSize: 12, fontFamily: "monospace", color: "var(--text-secondary)", lineHeight: 1.7 }}>{p}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
+
             <div className="form-group" style={{ gridColumn: "1/-1" }}>
-              <label>Source Paths (one per line)</label>
-              <textarea value={sourcePaths} onChange={(e) => setSourcePaths(e.target.value)} rows={3} placeholder="/home/user/data&#10;/var/lib/database" required />
+              <label>{selectedSvcs.length > 0 ? "Additional paths (one per line)" : "Source Paths (one per line)"}</label>
+              <textarea value={extraPaths} onChange={(e) => setExtraPaths(e.target.value)}
+                rows={selectedSvcs.length > 0 ? 2 : 3}
+                placeholder="/home/user/data&#10;/var/lib/database"
+                required={selectedSvcs.length === 0 && !extraPaths} />
             </div>
             <div className="form-group" style={{ gridColumn: "1/-1" }}>
               <label>Destinations</label>
@@ -261,11 +361,27 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="form-group">
                 <label>Pre-backup Script</label>
-                <textarea value={preScript} onChange={(e) => setPreScript(e.target.value)} rows={2} placeholder="#!/bin/bash&#10;pg_dump mydb > /tmp/db.sql" />
+                {selectedSvcs.length > 0 && combinedPreScript ? (
+                  <textarea value={combinedPreScript} readOnly rows={Math.min(combinedPreScript.split("\n").length + 1, 8)}
+                    style={{ opacity: 0.8, fontFamily: "monospace", fontSize: 12 }} />
+                ) : (
+                  <textarea value={preScript} onChange={(e) => setPreScript(e.target.value)} rows={2} placeholder="#!/bin/bash&#10;pg_dump mydb > /tmp/db.sql" />
+                )}
+                {selectedSvcs.length > 0 && combinedPreScript && (
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Auto-generated from selected services</div>
+                )}
               </div>
               <div className="form-group">
                 <label>Post-backup Script</label>
-                <textarea value={postScript} onChange={(e) => setPostScript(e.target.value)} rows={2} placeholder="#!/bin/bash&#10;rm /tmp/db.sql" />
+                {selectedSvcs.length > 0 && combinedPostScript ? (
+                  <textarea value={combinedPostScript} readOnly rows={Math.min(combinedPostScript.split("\n").length + 1, 6)}
+                    style={{ opacity: 0.8, fontFamily: "monospace", fontSize: 12 }} />
+                ) : (
+                  <textarea value={postScript} onChange={(e) => setPostScript(e.target.value)} rows={2} placeholder="#!/bin/bash&#10;rm /tmp/db.sql" />
+                )}
+                {selectedSvcs.length > 0 && combinedPostScript && (
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Auto-generated from selected services</div>
+                )}
               </div>
               <div className="form-group">
                 <label>Exclude Patterns (one per line)</label>
