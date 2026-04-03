@@ -243,11 +243,11 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=backuptool-agent
-# Security hardening
+# Security hardening — runs as unprivileged system user; no privilege escalation allowed.
+# ProtectSystem/ProtectHome are intentionally NOT set so the agent can read source paths
+# (e.g. /etc, /var/lib/...) and write to local backup destinations anywhere on the filesystem.
+# Unix permissions on the backuptool user remain the security boundary.
 NoNewPrivileges=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=$DATA_DIR
 
 [Install]
 WantedBy=multi-user.target

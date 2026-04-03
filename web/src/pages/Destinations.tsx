@@ -30,7 +30,7 @@ const CONFIG_FIELDS: Record<string, Array<{ key: string; label: string; type?: s
     { key: "bucket", label: "Bucket Name" },
     { key: "path", label: "Path Prefix (optional)" },
   ],
-  local: [{ key: "path", label: "Local Path", placeholder: "/mnt/backup" }],
+  local: [{ key: "path", label: "Local Path", placeholder: "/var/lib/backuptool-agent/repos/myjob" }],
   sftp: [
     { key: "host", label: "Host" },
     { key: "port", label: "Port", placeholder: "22" },
@@ -140,6 +140,13 @@ export default function Destinations() {
                   )}
                 </div>
               ))}
+              {type === "local" && (
+                <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 8 }}>
+                  <strong>Local path:</strong> must be writable by the agent service user (<code>backuptool</code>).
+                  Recommended: <code>/var/lib/backuptool-agent/repos/</code> or a mounted volume accessible to that user.
+                  Run <code>chown -R backuptool:backuptool /your/path</code> if needed.
+                </div>
+              )}
               <div className="alert alert-info" style={{ fontSize: 12 }}>
                 Credentials are encrypted with AES-256-GCM before storage.
               </div>
