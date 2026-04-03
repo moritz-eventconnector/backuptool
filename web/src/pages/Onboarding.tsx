@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
-  Shield, Check, ChevronRight, Server, Mail, Globe, Lock, SkipForward,
+  Check, ChevronRight, Server, Mail, Globe, Lock, SkipForward,
 } from "lucide-react";
 import { api } from "../api/client";
+import logoFull from "../assets/logo-full.svg";
 
 const STEPS = [
   { id: "welcome", label: "Welcome" },
@@ -28,12 +29,9 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     <div style={{ minHeight: "100vh", display: "flex", background: "var(--bg)" }}>
       {/* Sidebar steps */}
       <aside style={{ width: 220, background: "var(--bg-card)", borderRight: "1px solid var(--border)", padding: "32px 0", flexShrink: 0 }}>
-        <div style={{ padding: "0 20px 24px" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, background: "rgba(99,102,241,.15)", borderRadius: 10, marginBottom: 12 }}>
-            <Shield size={20} color="var(--primary)" />
-          </div>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>Setup Wizard</div>
-          <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 2 }}>Configure BackupTool</div>
+        <div style={{ padding: "0 20px 24px", borderBottom: "1px solid var(--border)", marginBottom: 8 }}>
+          <img src={logoFull} alt="BackupTool" style={{ height: 36, width: "auto", display: "block", marginBottom: 10 }} />
+          <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Setup Wizard</div>
         </div>
 
         {STEPS.map((s, i) => (

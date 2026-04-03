@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Job, type DiscoveredService } from "../api/client.ts";
 import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp } from "lucide-react";
+import { CronPicker } from "../components/CronPicker.tsx";
 
 export default function Jobs() {
   const qc = useQueryClient();
@@ -226,9 +227,9 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
                 {agents.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.hostname})</option>)}
               </select>
             </div>
-            <div className="form-group">
-              <label>Schedule (cron)</label>
-              <input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 2 * * * (daily at 2am)" />
+            <div className="form-group" style={{ gridColumn: "1/-1" }}>
+              <label>Schedule <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 12 }}>(leave empty for manual-only)</span></label>
+              <CronPicker value={schedule} onChange={setSchedule} />
             </div>
             {!job && discoveredServices.length > 0 && (
               <div style={{ gridColumn: "1/-1" }}>
