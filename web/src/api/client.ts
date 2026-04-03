@@ -75,6 +75,7 @@ export const api = {
   deleteJob: (id: string) => request(`/jobs/${id}`, { method: "DELETE" }),
   runJob: (id: string) => request<{ snapshotId: string }>(`/jobs/${id}/run`, { method: "POST" }),
   getJobSnapshots: (id: string) => request<Snapshot[]>(`/jobs/${id}/snapshots`),
+  getOverdueJobs: () => request<{ jobId: string; jobName: string; agentId: string; prevRun: string; lastSuccessAt: string | null }[]>("/jobs/overdue"),
 
   // Snapshots
   listSnapshots: (limit = 100) => request<Snapshot[]>(`/snapshots?limit=${limit}`),

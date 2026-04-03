@@ -27,6 +27,7 @@ import { installRouter } from "./api/install.js";
 import { appConfigRouter } from "./api/app-config.js";
 import { ssoConfigRouter } from "./api/sso-config.js";
 import { proxyRouter } from "./api/proxy.js";
+import { startOverdueChecker } from "./alerts/overdue.js";
 
 async function main() {
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -123,6 +124,9 @@ async function main() {
   // ── HTTP + WebSocket server ─────────────────────────────────────────────────
   const server = http.createServer(app);
   initWebSocket(server);
+
+  // Start background overdue backup checker
+  startOverdueChecker();
 
   server.listen(config.port, () => {
     logger.info(`BackupTool server running on port ${config.port}`);

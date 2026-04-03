@@ -149,7 +149,50 @@ echo "  Server : $SERVER"
 echo "  OS/Arch: $OS/$ARCH"
 echo ""
 
-# ── Download binary ────────────────────────────────────────────────────────
+# ── Install restic if not present ─────────────────────────────────────────
+if ! command -v restic &>/dev/null; then
+  echo "Installing restic..."
+  RESTIC_INSTALLED=0
+
+  # Try package manager first
+  if command -v apt-get &>/dev/null; then
+    apt-get install -y restic 2>/dev/null && RESTIC_INSTALLED=1
+  elif command -v yum &>/dev/null; then
+    yum install -y restic 2>/dev/null && RESTIC_INSTALLED=1
+  elif command -v dnf &>/dev/null; then
+    dnf install -y restic 2>/dev/null && RESTIC_INSTALLED=1
+  elif command -v brew &>/dev/null; then
+    brew install restic 2>/dev/null && RESTIC_INSTALLED=1
+  fi
+
+  # Fallback: download directly from GitHub releases
+  if [ "$RESTIC_INSTALLED" -eq 0 ]; then
+    echo "  Package manager unavailable — downloading restic from GitHub..."
+    RESTIC_VERSION=$(curl -fsSL https://api.github.com/repos/restic/restic/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\\([^"]*\\)".*/\\1/' || echo "0.17.3")
+    RESTIC_ARCH="$ARCH"
+    RESTIC_URL="https://github.com/restic/restic/releases/download/v\${RESTIC_VERSION}/restic_\${RESTIC_VERSION}_\${OS}_\${RESTIC_ARCH}.bz2"
+    TMP_BZ2=$(mktemp)
+    if command -v curl &>/dev/null; then
+      curl -fsSL -o "$TMP_BZ2" "$RESTIC_URL"
+    else
+      wget -qO "$TMP_BZ2" "$RESTIC_URL"
+    fi
+    bunzip2 -c "$TMP_BZ2" > /usr/local/bin/restic
+    chmod +x /usr/local/bin/restic
+    rm -f "$TMP_BZ2"
+    RESTIC_INSTALLED=1
+  fi
+
+  if command -v restic &>/dev/null; then
+    echo "  restic $(restic version | head -1) installed."
+  else
+    echo "  WARNING: Could not install restic. Please install it manually: https://restic.net" >&2
+  fi
+else
+  echo "restic already installed: $(restic version | head -1)"
+fi
+
+# ── Download agent binary ──────────────────────────────────────────────────
 echo "Downloading agent binary..."
 BINARY_URL="$SERVER/api/agents/install/$AGENT_ID/$TOKEN/binary/$OS/$ARCH"
 TMP=$(mktemp)
@@ -287,7 +330,30 @@ Write-Host ""
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DataDir    | Out-Null
 
-$BinaryUrl = "$Server/api/agents/binary/windows/amd64"
+# ── Install restic if not present ─────────────────────────────────────────
+if (-not (Get-Command restic -ErrorAction SilentlyContinue)) {
+  Write-Host "Installing restic..."
+  $ResticBin = "$InstallDir\\restic.exe"
+  try {
+    $latestJson = (Invoke-WebRequest -Uri "https://api.github.com/repos/restic/restic/releases/latest" -UseBasicParsing).Content | ConvertFrom-Json
+    $ver = $latestJson.tag_name -replace '^v',''
+    $resticUrl = "https://github.com/restic/restic/releases/download/v$ver/restic_\${ver}_windows_amd64.zip"
+    $tmpZip = "$env:TEMP\\restic.zip"
+    Invoke-WebRequest -Uri $resticUrl -OutFile $tmpZip -UseBasicParsing
+    Expand-Archive -Path $tmpZip -DestinationPath "$env:TEMP\\restic_extract" -Force
+    $extracted = Get-ChildItem "$env:TEMP\\restic_extract" -Filter "*.exe" | Select-Object -First 1
+    Move-Item -Force $extracted.FullName $ResticBin
+    Remove-Item $tmpZip -Force
+    Remove-Item "$env:TEMP\\restic_extract" -Recurse -Force
+    Write-Host "  restic installed to $ResticBin"
+  } catch {
+    Write-Host "  WARNING: Could not auto-install restic. Download from https://restic.net" -ForegroundColor Yellow
+  }
+} else {
+  Write-Host "restic already installed."
+}
+
+$BinaryUrl = "$Server/api/agents/install/$AgentId/$Token/binary/windows/amd64"
 Write-Host "Downloading agent binary..."
 Invoke-WebRequest -Uri $BinaryUrl -OutFile $BinPath -UseBasicParsing
 Write-Host "  Saved to $BinPath"

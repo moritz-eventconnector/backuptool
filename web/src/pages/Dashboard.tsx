@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
 import { useEffect, useRef, useState } from "react";
 import { config } from "../config.ts";
-import { CheckCircle, XCircle, Clock, Server, Activity, Trash2, HardDrive } from "lucide-react";
+import { CheckCircle, XCircle, Clock, Server, Activity, Trash2, HardDrive, AlertTriangle, ShieldCheck, ShieldAlert } from "lucide-react";
 
 interface ProgressInfo {
   snapshotId: string;
@@ -20,9 +20,19 @@ interface ActivityEvent {
   type: string;
   agentId?: string;
   snapshotId?: string;
+  jobId?: string;
+  jobName?: string;
   status?: string;
   message?: string;
   ts: number;
+}
+
+interface OverdueJob {
+  jobId: string;
+  jobName: string;
+  agentId: string;
+  prevRun: string;
+  lastSuccessAt: string | null;
 }
 
 export default function Dashboard() {
@@ -30,6 +40,11 @@ export default function Dashboard() {
   const { data: agents = [] } = useQuery({ queryKey: ["agents"], queryFn: api.listAgents });
   const { data: snapshots = [] } = useQuery({ queryKey: ["snapshots"], queryFn: () => api.listSnapshots(50) });
   const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
+  const { data: overdueJobs = [] } = useQuery({
+    queryKey: ["overdue-jobs"],
+    queryFn: api.getOverdueJobs,
+    refetchInterval: 5 * 60 * 1000, // re-check every 5 min
+  });
   const deleteMut = useMutation({
     mutationFn: api.deleteAgent,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
@@ -37,6 +52,7 @@ export default function Dashboard() {
 
   const [runningJobs, setRunningJobs] = useState<Record<string, ProgressInfo>>({});
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [liveOverdue, setLiveOverdue] = useState<OverdueJob[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -67,10 +83,19 @@ export default function Dashboard() {
             return next;
           });
           qc.invalidateQueries({ queryKey: ["snapshots"] });
+          qc.invalidateQueries({ queryKey: ["overdue-jobs"] });
           setActivity((prev) => [{ type: "snapshot_done", snapshotId: msg.snapshotId, status: msg.status, agentId: msg.agentId, ts: Date.now() }, ...prev].slice(0, 10));
         } else if (msg.type === "agent_status") {
           qc.invalidateQueries({ queryKey: ["agents"] });
           setActivity((prev) => [{ type: "agent_status", agentId: msg.agentId, status: msg.status, ts: Date.now() }, ...prev].slice(0, 10));
+        } else if (msg.type === "check_result") {
+          const evtStatus = msg.status === "passed" ? "check_passed" : "check_failed";
+          setActivity((prev) => [{ type: evtStatus, snapshotId: msg.snapshotId, agentId: msg.agentId, ts: Date.now() }, ...prev].slice(0, 10));
+        } else if (msg.type === "backup_overdue") {
+          setLiveOverdue((prev) => {
+            if (prev.some((j: OverdueJob) => j.jobId === msg.jobId)) return prev;
+            return [...prev, { jobId: msg.jobId, jobName: msg.jobName, agentId: msg.agentId, prevRun: msg.prevRun, lastSuccessAt: msg.lastSuccessAt ?? null }];
+          });
         }
       } catch { /**/ }
     };
@@ -82,9 +107,38 @@ export default function Dashboard() {
   const failedToday = snapshots.filter((s) => s.status === "failed" && isToday(s.startedAt)).length;
   const activeRunning = Object.keys(runningJobs).length;
 
+  // Merge server-fetched overdue with live WebSocket-pushed overdue
+  const allOverdue: OverdueJob[] = [
+    ...overdueJobs,
+    ...liveOverdue.filter((l) => !overdueJobs.some((o) => o.jobId === l.jobId)),
+  ];
+
   return (
     <div>
       <div className="page-header"><h1>Dashboard</h1></div>
+
+      {/* Overdue backup warnings */}
+      {allOverdue.length > 0 && (
+        <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+          {allOverdue.map((j) => (
+            <div key={j.jobId} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px", borderRadius: "var(--radius)",
+              background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.3)",
+              color: "var(--danger)",
+            }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+              <div style={{ fontSize: 13, flex: 1 }}>
+                <strong>{j.jobName}</strong> — backup overdue since{" "}
+                <strong>{new Date(j.prevRun).toLocaleString()}</strong>
+                {j.lastSuccessAt
+                  ? `. Last success: ${new Date(j.lastSuccessAt).toLocaleString()}`
+                  : ". Never ran successfully."}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="stat-grid">
@@ -247,11 +301,18 @@ export default function Dashboard() {
                       e.status === "success"
                         ? <CheckCircle size={12} color="var(--success)" />
                         : <XCircle size={12} color="var(--danger)" />
+                    ) : e.type === "check_passed" ? (
+                      <ShieldCheck size={12} color="var(--success)" />
+                    ) : e.type === "check_failed" ? (
+                      <ShieldAlert size={12} color="var(--danger)" />
                     ) : (
                       <HardDrive size={12} color="var(--text-muted)" />
                     )}
                     <span style={{ color: "var(--text)" }}>
-                      {e.type === "snapshot_done" ? `Backup ${e.status}` : `Agent ${e.status}`}
+                      {e.type === "snapshot_done" ? `Backup ${e.status}`
+                        : e.type === "check_passed" ? "Integrity check passed"
+                        : e.type === "check_failed" ? "Integrity check FAILED"
+                        : `Agent ${e.status}`}
                     </span>
                     <span style={{ color: "var(--text-muted)", marginLeft: "auto" }}>{fmtRelative(e.ts)}</span>
                   </div>

@@ -85,6 +85,7 @@ export const snapshots = sqliteTable("snapshots", {
   startedAt: text("started_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
   finishedAt: text("finished_at"),
   retryCount: integer("retry_count").notNull().default(0),
+  integrityCheckStatus: text("integrity_check_status"), // "passed" | "failed" | null = not yet checked
 });
 
 // ── Snapshot Logs ─────────────────────────────────────────────────────────────
