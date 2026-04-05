@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal } from "lucide-react";
+import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw } from "lucide-react";
 
 type OsTab = "linux" | "windows" | "manual";
 
@@ -23,6 +23,13 @@ export default function Agents() {
     mutationFn: api.deleteAgent,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
   });
+
+  const updateMut = useMutation({
+    mutationFn: (id: string) => api.updateAgent(id),
+    onSuccess: (_, id) => setUpdateMsg((m) => ({ ...m, [id]: "Update command sent — agent is restarting…" })),
+    onError: (e: Error, id) => setUpdateMsg((m) => ({ ...m, [id]: e.message })),
+  });
+  const [updateMsg, setUpdateMsg] = useState<Record<string, string>>({});
 
   const serverOrigin = window.location.origin;
 
@@ -80,10 +87,26 @@ export default function Agents() {
                   <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.lastSeen ? new Date(a.lastSeen).toLocaleString() : "Never"}</td>
                   <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.version}</td>
                   <td>
-                    <button className="btn-ghost" style={{ padding: "4px 8px" }}
-                      onClick={() => { if (confirm(`Delete agent "${a.name}"?`)) deleteMut.mutate(a.id); }}>
-                      <Trash2 size={13} color="var(--danger)" />
-                    </button>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center", justifyContent: "flex-end" }}>
+                      {updateMsg[a.id] && (
+                        <span style={{ fontSize: 11, color: updateMsg[a.id].startsWith("Update command") ? "var(--success, #22c55e)" : "var(--danger)", marginRight: 4 }}>
+                          {updateMsg[a.id]}
+                        </span>
+                      )}
+                      <button className="btn-ghost" style={{ padding: "4px 8px" }}
+                        title={a.status === "online" ? "Push update to agent" : "Agent offline — restart service to auto-update"}
+                        disabled={updateMut.isPending}
+                        onClick={() => {
+                          setUpdateMsg((m) => ({ ...m, [a.id]: "" }));
+                          updateMut.mutate(a.id);
+                        }}>
+                        <RefreshCw size={13} color={a.status === "online" ? "var(--primary)" : "var(--text-muted)"} />
+                      </button>
+                      <button className="btn-ghost" style={{ padding: "4px 8px" }}
+                        onClick={() => { if (confirm(`Delete agent "${a.name}"?`)) deleteMut.mutate(a.id); }}>
+                        <Trash2 size={13} color="var(--danger)" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
