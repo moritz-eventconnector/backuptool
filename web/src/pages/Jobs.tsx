@@ -123,7 +123,7 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
 
   // Combine paths from selected services + manually added paths (deduplicated)
   const combinedPaths = useMemo(() => {
-    const fromSvcs = selectedSvcs.flatMap((s) => s.sourcePaths);
+    const fromSvcs = selectedSvcs.flatMap((s) => (s.sourcePaths ?? []).filter(Boolean));
     const manual = extraPaths.split("\n").map((p) => p.trim()).filter(Boolean);
     return [...new Set([...fromSvcs, ...manual])];
   }, [selectedSvcs, extraPaths]);
