@@ -134,8 +134,8 @@ export const api = {
   deleteUser: (id: string) => request(`/settings/users/${id}`, { method: "DELETE" }),
 
   // Snapshot restore
-  restoreSnapshot: (id: string, restorePath: string, targetAgentId?: string) =>
-    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath, targetAgentId }) }),
+  restoreSnapshot: (id: string, restorePath: string, targetAgentId?: string, includePaths?: string[]) =>
+    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath, targetAgentId, includePaths }) }),
   getRestoreAgents: (id: string) => request<RestoreAgent[]>(`/snapshots/${id}/restore-agents`),
 };
 

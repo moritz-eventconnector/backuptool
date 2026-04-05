@@ -249,12 +249,14 @@ func handleConnection(
 
 		case "restore":
 			var snapshotID, resticSnapshotID, restorePath, destinationID string
+			var includePaths []string
 			json.Unmarshal(msg["snapshotId"], &snapshotID)
 			json.Unmarshal(msg["resticSnapshotId"], &resticSnapshotID)
 			json.Unmarshal(msg["restorePath"], &restorePath)
 			json.Unmarshal(msg["destinationId"], &destinationID)
+			json.Unmarshal(msg["includePaths"], &includePaths)
 			go func() {
-				log.Printf("Starting restore of %s to %s", resticSnapshotID, restorePath)
+				log.Printf("Starting restore of %s to %s (includePaths=%v)", resticSnapshotID, restorePath, includePaths)
 				progressCh := make(chan backup.RestoreProgress, 32)
 				go func() {
 					for p := range progressCh {
@@ -267,7 +269,7 @@ func handleConnection(
 						})
 					}
 				}()
-				err := handleRestore(ctx, srv, runner, resticSnapshotID, restorePath, destinationID, progressCh)
+				err := handleRestore(ctx, srv, runner, resticSnapshotID, restorePath, destinationID, includePaths, progressCh)
 				close(progressCh)
 				result := map[string]interface{}{
 					"type":             "restore_result",
@@ -475,7 +477,7 @@ func runBackup(ctx context.Context, conn *websocket.Conn, runner *backup.Runner,
 	}
 }
 
-func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, restorePath, destinationID string, progressCh chan<- backup.RestoreProgress) error {
+func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, restorePath, destinationID string, includePaths []string, progressCh chan<- backup.RestoreProgress) error {
 	// Get job configs to find the destination
 	jobs, err := srv.GetJobConfigs()
 	if err != nil {
@@ -491,7 +493,7 @@ func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup
 					Type:   d.Type,
 					Config: d.Config,
 				}
-				return runner.Restore(ctx, dest, resticSnapshotID, restorePath, job.ResticPassword, progressCh)
+				return runner.Restore(ctx, dest, resticSnapshotID, restorePath, job.ResticPassword, includePaths, progressCh)
 			}
 		}
 	}

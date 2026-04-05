@@ -23,6 +23,9 @@ export default function Snapshots() {
   const [restoreFilesDone, setRestoreFilesDone] = useState<number | null>(null);
   const [restoreFilesTotal, setRestoreFilesTotal] = useState<number | null>(null);
   const [targetAgentId, setTargetAgentId] = useState<string>("");
+  // Partial restore: checked source paths + optional custom patterns
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [customInclude, setCustomInclude] = useState("");
   const [backupProgress, setBackupProgress] = useState<Record<string, BackupProgress>>({});
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -80,8 +83,8 @@ export default function Snapshots() {
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
   const restoreMut = useMutation({
-    mutationFn: ({ id, path, agentId }: { id: string; path: string; agentId?: string }) =>
-      api.restoreSnapshot(id, path, agentId || undefined),
+    mutationFn: ({ id, path, agentId, includePaths }: { id: string; path: string; agentId?: string; includePaths?: string[] }) =>
+      api.restoreSnapshot(id, path, agentId || undefined, includePaths?.length ? includePaths : undefined),
     onSuccess: () => {
       setRestoreRunning(true);
       setRestorePercent(null);
@@ -109,18 +112,59 @@ export default function Snapshots() {
         const dialogJob = jobs.find((j) => j.id === restoreDialog.jobId);
         const sourcePaths: string[] = dialogJob?.sourcePaths ?? [];
         const effectivePath = restoreMode === "original" ? "/" : restorePath;
+
+        // Build includePaths: checked source paths + custom patterns
+        const customLines = customInclude.split("\n").map((l) => l.trim()).filter(Boolean);
+        const includePaths = selectedPaths.length < sourcePaths.length || customLines.length
+          ? [...selectedPaths, ...customLines]
+          : []; // empty = restore everything
+
+        const allChecked = selectedPaths.length === sourcePaths.length;
+
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-            <div className="card" style={{ width: 500, background: "var(--bg-secondary)" }}>
+            <div className="card" style={{ width: 520, background: "var(--bg-secondary)", maxHeight: "90vh", overflowY: "auto" }}>
               <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Restore Snapshot</h3>
               {restoreMsg && <div className={`alert ${restoreMsg.startsWith("Error") || restoreMsg.startsWith("Restore failed") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 10 }}>{restoreMsg}</div>}
 
+              {/* Path selection */}
               {sourcePaths.length > 0 && (
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>BACKED UP PATHS</div>
-                  <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>
-                    {sourcePaths.map((p) => <div key={p} style={{ color: "var(--text-secondary)" }}>{p}</div>)}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>WHAT TO RESTORE</div>
+                    <button className="btn-ghost" style={{ fontSize: 11, padding: "2px 6px" }}
+                      onClick={() => setSelectedPaths(allChecked ? [] : [...sourcePaths])}>
+                      {allChecked ? "Deselect all" : "Select all"}
+                    </button>
                   </div>
+                  <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "6px 8px" }}>
+                    {sourcePaths.map((p) => (
+                      <label key={p} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", cursor: "pointer" }}>
+                        <input type="checkbox" checked={selectedPaths.includes(p)}
+                          onChange={(e) => setSelectedPaths((prev) =>
+                            e.target.checked ? [...prev, p] : prev.filter((x) => x !== p)
+                          )} />
+                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>{p}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Additional paths / patterns (one per line, optional)</div>
+                    <textarea
+                      value={customInclude}
+                      onChange={(e) => setCustomInclude(e.target.value)}
+                      placeholder={"/etc/nginx/nginx.conf\n/var/www/html"}
+                      rows={2}
+                      style={{ fontFamily: "monospace", fontSize: 12, resize: "vertical" }}
+                    />
+                  </div>
+                  {includePaths.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "var(--success, #22c55e)", marginTop: 4 }}>All files will be restored.</div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                      Only restoring: {includePaths.map((p) => <code key={p} style={{ marginRight: 4 }}>{p}</code>)}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -175,11 +219,11 @@ export default function Snapshots() {
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                 <button className="btn-primary"
                   disabled={(restoreMode === "custom" && !restorePath) || restoreMut.isPending || restoreRunning}
-                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath, agentId: targetAgentId }); }}>
+                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath, agentId: targetAgentId, includePaths }); }}>
                   {restoreRunning ? <><span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} />Restoring…</> : "Restore"}
                 </button>
                 <button className="btn-ghost"
-                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); setRestorePercent(null); setTargetAgentId(""); }}>
+                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); setRestorePercent(null); setTargetAgentId(""); setSelectedPaths([]); setCustomInclude(""); }}>
                   {restoreRunning ? "Close" : "Cancel"}
                 </button>
               </div>
@@ -234,7 +278,14 @@ export default function Snapshots() {
                           {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                           {(s.status === "success" || s.status === "warning") && (
                             <button className="btn-ghost" style={{ padding: "3px 6px" }} title="Restore"
-                              onClick={(e) => { e.stopPropagation(); setRestoreDialog({ snapshotId: s.id, jobId: s.jobId }); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setTargetAgentId(""); }}>
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const jobForSnap = jobs.find((j) => j.id === s.jobId);
+                                setSelectedPaths(jobForSnap?.sourcePaths ?? []);
+                                setCustomInclude("");
+                                setRestoreDialog({ snapshotId: s.id, jobId: s.jobId });
+                                setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setTargetAgentId("");
+                              }}>
                               <RotateCcw size={12} color="var(--primary)" />
                             </button>
                           )}
