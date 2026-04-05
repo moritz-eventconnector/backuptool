@@ -217,15 +217,23 @@ type RestoreProgress struct {
 var restoreProgressRe = regexp.MustCompile(`([\d.]+)%\s+([\d,]+)\s*/\s*([\d,]+)`)
 
 // Restore runs restic restore for a given snapshot with live progress reporting.
+// includePaths optionally limits restore to specific paths (restic --include).
 // progressCh receives updates parsed from restic's verbose stderr output.
-func (r *Runner) Restore(ctx context.Context, dest *Destination, resticSnapshotID, targetPath, password string, progressCh chan<- RestoreProgress) error {
+func (r *Runner) Restore(ctx context.Context, dest *Destination, resticSnapshotID, targetPath, password string, includePaths []string, progressCh chan<- RestoreProgress) error {
 	repoURL, env, err := r.buildRepoURLAndEnv(dest)
 	if err != nil {
 		return err
 	}
 	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
 
-	cmd := exec.CommandContext(ctx, r.ResticBin, "restore", resticSnapshotID, "--target", targetPath, "--verbose")
+	args := []string{"restore", resticSnapshotID, "--target", targetPath, "--verbose"}
+	for _, p := range includePaths {
+		if p = strings.TrimSpace(p); p != "" {
+			args = append(args, "--include="+p)
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, r.ResticBin, args...)
 	cmd.Env = append(os.Environ(), env...)
 
 	stderr, err := cmd.StderrPipe()

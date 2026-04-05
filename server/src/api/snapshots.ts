@@ -68,14 +68,15 @@ snapshotsRouter.post("/:id/restore", requireAuth, (req, res) => {
     .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
   const destinationIds: string[] = JSON.parse(job?.destinationIds ?? "[]");
 
+  const includePaths = Array.isArray(req.body.includePaths) ? req.body.includePaths as string[] : undefined;
+
   const sent = sendToAgent(targetAgentId, {
     type: "restore",
     snapshotId: snap.id,
     resticSnapshotId: snap.resticSnapshotId,
     restorePath,
     destinationId: destinationIds[0] ?? snap.destinationId ?? "",
-    include: req.body.include,
-    exclude: req.body.exclude,
+    ...(includePaths?.length ? { includePaths } : {}),
   });
 
   if (!sent) {

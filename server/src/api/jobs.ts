@@ -34,7 +34,7 @@ const createJobSchema = z.object({
   sourcePaths: z.array(z.string().min(1)).min(1),
   destinationIds: z.array(z.string()).min(1),
   schedule: z.string().optional(), // cron expression
-  retention: retentionSchema,
+  retention: retentionSchema.optional().default({}),
   preScript: z.string().optional(),
   postScript: z.string().optional(),
   excludePatterns: z.array(z.string()).default([]),
@@ -68,7 +68,13 @@ jobsRouter.get("/:id", requireAuth, (req, res) => {
 jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) => {
   const parse = createJobSchema.safeParse(req.body);
   if (!parse.success) {
-    res.status(400).json({ error: "Invalid input", details: parse.error.flatten() });
+    const flat = parse.error.flatten();
+    const fieldErrors = Object.entries(flat.fieldErrors)
+      .map(([f, errs]) => `${f}: ${(errs as string[]).join(", ")}`)
+      .join("; ");
+    const msg = fieldErrors || flat.formErrors.join("; ") || "Invalid input";
+    logger.warn({ errors: flat }, "Job creation validation failed");
+    res.status(400).json({ error: msg, details: flat });
     return;
   }
 
