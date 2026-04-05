@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { getDb } from "../db/index.js";
-import { snapshots, snapshotLogs, backupJobs, agents } from "../db/schema/index.js";
+import { snapshots, snapshotLogs, backupJobs, agents, destinations } from "../db/schema/index.js";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../auth/middleware.js";
-import { sendToAgent } from "../websocket/index.js";
+import { sendToAgent, isAgentOnline } from "../websocket/index.js";
+import { decrypt } from "../crypto/encryption.js";
 
 export const snapshotsRouter = Router();
 
@@ -58,11 +59,21 @@ snapshotsRouter.post("/:id/restore", requireAuth, (req, res) => {
     return;
   }
 
-  const sent = sendToAgent(snap.agentId, {
+  // targetAgentId lets a different agent perform the restore (e.g. disaster recovery
+  // where the original host is gone and a new agent has been installed).
+  const targetAgentId = (req.body.targetAgentId as string | undefined) ?? snap.agentId;
+
+  // Look up the job to find the destination ID that the agent will need
+  const [job] = db.select({ destinationIds: backupJobs.destinationIds })
+    .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
+  const destinationIds: string[] = JSON.parse(job?.destinationIds ?? "[]");
+
+  const sent = sendToAgent(targetAgentId, {
     type: "restore",
     snapshotId: snap.id,
     resticSnapshotId: snap.resticSnapshotId,
     restorePath,
+    destinationId: destinationIds[0] ?? snap.destinationId ?? "",
     include: req.body.include,
     exclude: req.body.exclude,
   });
@@ -72,7 +83,7 @@ snapshotsRouter.post("/:id/restore", requireAuth, (req, res) => {
     return;
   }
 
-  res.json({ message: "Restore initiated" });
+  res.json({ message: "Restore initiated", targetAgentId });
 });
 
 // GET /api/snapshots/:id/files — browse snapshot file tree via agent
@@ -103,6 +114,20 @@ snapshotsRouter.get("/:id/files", requireAuth, (req, res) => {
   }
 
   res.json({ message: "File listing requested. Subscribe to WebSocket for results." });
+});
+
+// GET /api/snapshots/:id/restore-agents — list agents that can perform this restore
+// Returns all online agents; UI uses this to let the user pick an alternative agent.
+snapshotsRouter.get("/:id/restore-agents", requireAuth, (req, res) => {
+  const db = getDb();
+  const [snap] = db.select({ agentId: snapshots.agentId }).from(snapshots).where(eq(snapshots.id, req.params.id)).all();
+  if (!snap) { res.status(404).json({ error: "Snapshot not found" }); return; }
+
+  const allAgents = db.select({ id: agents.id, name: agents.name, hostname: agents.hostname, status: agents.status })
+    .from(agents).all()
+    .map((a) => ({ ...a, online: isAgentOnline(a.id), isOriginal: a.id === snap.agentId }));
+
+  res.json(allAgents);
 });
 
 // DELETE /api/snapshots/:id — forget/prune snapshot

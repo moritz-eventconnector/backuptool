@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Snapshot, type SnapshotLog } from "../api/client.ts";
+import { api, type Snapshot, type SnapshotLog, type RestoreAgent } from "../api/client.ts";
 import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock } from "lucide-react";
 import { config } from "../config.ts";
+
+// Live backup progress received via WebSocket: keyed by snapshotId
+type BackupProgress = { percent: number; filesDone: number; filesTotal: number; bytesDone: number; bytesTotal: number };
 
 export default function Snapshots() {
   const qc = useQueryClient();
@@ -16,9 +19,14 @@ export default function Snapshots() {
   const [restoreMode, setRestoreMode] = useState<"original" | "custom">("original");
   const [restoreMsg, setRestoreMsg] = useState("");
   const [restoreRunning, setRestoreRunning] = useState(false);
+  const [restorePercent, setRestorePercent] = useState<number | null>(null);
+  const [restoreFilesDone, setRestoreFilesDone] = useState<number | null>(null);
+  const [restoreFilesTotal, setRestoreFilesTotal] = useState<number | null>(null);
+  const [targetAgentId, setTargetAgentId] = useState<string>("");
+  const [backupProgress, setBackupProgress] = useState<Record<string, BackupProgress>>({});
   const wsRef = useRef<WebSocket | null>(null);
 
-  // WebSocket — listen for restore_result while on this page
+  // WebSocket — listen for progress and results while on this page
   useEffect(() => {
     const ws = new WebSocket(config.wsUrl);
     wsRef.current = ws;
@@ -28,12 +36,42 @@ export default function Snapshots() {
         const msg = JSON.parse(e.data);
         if (msg.type === "restore_result") {
           setRestoreRunning(false);
+          setRestorePercent(null);
           if (msg.status === "success") {
             setRestoreMsg(`Restore completed successfully. Files are at: ${msg.restorePath}`);
           } else {
             setRestoreMsg(`Restore failed: ${msg.errorMessage ?? "unknown error"}`);
           }
           qc.invalidateQueries({ queryKey: ["snapshot-logs", msg.snapshotId] });
+        } else if (msg.type === "restore_progress") {
+          setRestorePercent(msg.percent ?? null);
+          if (msg.filesDone != null) setRestoreFilesDone(msg.filesDone);
+          if (msg.filesTotal != null) setRestoreFilesTotal(msg.filesTotal);
+        } else if (msg.type === "progress") {
+          // backup progress
+          const sid = msg.snapshotId as string;
+          if (sid) {
+            setBackupProgress((prev) => ({
+              ...prev,
+              [sid]: {
+                percent: msg.percent ?? 0,
+                filesDone: msg.filesDone ?? 0,
+                filesTotal: msg.filesTotal ?? 0,
+                bytesDone: msg.bytesDone ?? 0,
+                bytesTotal: msg.bytesTotal ?? 0,
+              },
+            }));
+          }
+        } else if (msg.type === "snapshot_done" || msg.type === "check_result") {
+          // refresh snapshots when backup/check finishes
+          qc.invalidateQueries({ queryKey: ["snapshots"] });
+          if (msg.snapshotId) {
+            setBackupProgress((prev) => {
+              const next = { ...prev };
+              delete next[msg.snapshotId as string];
+              return next;
+            });
+          }
         }
       } catch { /**/ }
     };
@@ -42,9 +80,11 @@ export default function Snapshots() {
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
   const restoreMut = useMutation({
-    mutationFn: ({ id, path }: { id: string; path: string }) => api.restoreSnapshot(id, path),
+    mutationFn: ({ id, path, agentId }: { id: string; path: string; agentId?: string }) =>
+      api.restoreSnapshot(id, path, agentId || undefined),
     onSuccess: () => {
       setRestoreRunning(true);
+      setRestorePercent(null);
       setRestoreMsg("Restore running on agent — this may take a few minutes…");
     },
     onError: (e: Error) => { setRestoreMsg(`Error: ${e.message}`); },
@@ -57,7 +97,7 @@ export default function Snapshots() {
       <div className="page-header">
         <h1>Snapshots</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          {["all", "success", "failed", "running"].map((s) => (
+          {["all", "success", "warning", "failed", "running"].map((s) => (
             <button key={s} className={statusFilter === s ? "btn-primary" : "btn-ghost"} style={{ padding: "6px 14px", textTransform: "capitalize" }}
               onClick={() => setStatusFilter(s)}>{s}</button>
           ))}
@@ -71,9 +111,9 @@ export default function Snapshots() {
         const effectivePath = restoreMode === "original" ? "/" : restorePath;
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-            <div className="card" style={{ width: 480, background: "var(--bg-secondary)" }}>
+            <div className="card" style={{ width: 500, background: "var(--bg-secondary)" }}>
               <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Restore Snapshot</h3>
-              {restoreMsg && <div className={`alert ${restoreMsg.startsWith("Error") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 10 }}>{restoreMsg}</div>}
+              {restoreMsg && <div className={`alert ${restoreMsg.startsWith("Error") || restoreMsg.startsWith("Restore failed") ? "alert-error" : "alert-success"}`} style={{ marginBottom: 10 }}>{restoreMsg}</div>}
 
               {sourcePaths.length > 0 && (
                 <div style={{ marginBottom: 14 }}>
@@ -83,6 +123,9 @@ export default function Snapshots() {
                   </div>
                 </div>
               )}
+
+              {/* Agent selector for cross-agent restore */}
+              <AgentSelector snapshotId={restoreDialog.snapshotId} value={targetAgentId} onChange={setTargetAgentId} />
 
               <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                 <button
@@ -116,14 +159,27 @@ export default function Snapshots() {
                 </div>
               )}
 
+              {/* Restore progress bar */}
+              {restoreRunning && restorePercent != null && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                    <span>Restoring…</span>
+                    <span>{restorePercent.toFixed(1)}%{restoreFilesTotal ? ` — ${restoreFilesDone}/${restoreFilesTotal} files` : ""}</span>
+                  </div>
+                  <div style={{ height: 6, background: "var(--bg)", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${restorePercent}%`, background: "var(--primary)", transition: "width .3s ease" }} />
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                 <button className="btn-primary"
                   disabled={(restoreMode === "custom" && !restorePath) || restoreMut.isPending || restoreRunning}
-                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath }); }}>
+                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath, agentId: targetAgentId }); }}>
                   {restoreRunning ? <><span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} />Restoring…</> : "Restore"}
                 </button>
                 <button className="btn-ghost"
-                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); }}>
+                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); setRestorePercent(null); setTargetAgentId(""); }}>
                   {restoreRunning ? "Close" : "Cancel"}
                 </button>
               </div>
@@ -146,6 +202,7 @@ export default function Snapshots() {
               {filtered.map((s) => {
                 const job = jobs.find((j) => j.id === s.jobId);
                 const agent = agents.find((a) => a.id === s.agentId);
+                const prog = backupProgress[s.id];
 
                 // WORM lock state
                 const wormLocked = (() => {
@@ -175,9 +232,9 @@ export default function Snapshots() {
                       <td>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                           {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          {s.status === "success" && (
+                          {(s.status === "success" || s.status === "warning") && (
                             <button className="btn-ghost" style={{ padding: "3px 6px" }} title="Restore"
-                              onClick={(e) => { e.stopPropagation(); setRestoreDialog({ snapshotId: s.id, jobId: s.jobId }); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); }}>
+                              onClick={(e) => { e.stopPropagation(); setRestoreDialog({ snapshotId: s.id, jobId: s.jobId }); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setTargetAgentId(""); }}>
                               <RotateCcw size={12} color="var(--primary)" />
                             </button>
                           )}
@@ -195,6 +252,24 @@ export default function Snapshots() {
                         </div>
                       </td>
                     </tr>
+                    {/* Live backup progress bar */}
+                    {s.status === "running" && prog && (
+                      <tr key={`${s.id}-progress`}>
+                        <td colSpan={8} style={{ padding: "0 16px 8px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-muted)", marginBottom: 3 }}>
+                            <span>Backing up…</span>
+                            <span>
+                              {prog.percent.toFixed(1)}%
+                              {prog.filesTotal > 0 ? ` — ${prog.filesDone}/${prog.filesTotal} files` : ""}
+                              {prog.bytesTotal > 0 ? ` — ${fmtSize(prog.bytesDone)} / ${fmtSize(prog.bytesTotal)}` : ""}
+                            </span>
+                          </div>
+                          <div style={{ height: 4, background: "var(--bg)", borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${prog.percent}%`, background: "var(--primary)", transition: "width .5s ease" }} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {expanded === s.id && (
                       <tr key={`${s.id}-detail`}>
                         <td colSpan={8} style={{ padding: 0 }}>
@@ -213,6 +288,32 @@ export default function Snapshots() {
   );
 }
 
+function AgentSelector({ snapshotId, value, onChange }: { snapshotId: string; value: string; onChange: (id: string) => void }) {
+  const { data: restoreAgents = [] } = useQuery<RestoreAgent[]>({
+    queryKey: ["restore-agents", snapshotId],
+    queryFn: () => api.getRestoreAgents(snapshotId),
+  });
+
+  if (restoreAgents.length <= 1) return null;
+
+  return (
+    <div className="form-group" style={{ marginBottom: 14 }}>
+      <label>Restore on agent</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Original agent{restoreAgents.find((a) => a.isOriginal) ? ` (${restoreAgents.find((a) => a.isOriginal)!.name})` : ""}</option>
+        {restoreAgents.map((a) => (
+          <option key={a.id} value={a.id} disabled={!a.online}>
+            {a.name} ({a.hostname}){a.isOriginal ? " — original" : ""}{!a.online ? " — offline" : ""}
+          </option>
+        ))}
+      </select>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+        Use a different agent for disaster recovery (e.g. original server is gone).
+      </div>
+    </div>
+  );
+}
+
 function SnapshotDetail({ snapshot }: { snapshot: Snapshot }) {
   const { data: logs = [] } = useQuery({
     queryKey: ["snapshot-logs", snapshot.id],
@@ -226,8 +327,16 @@ function SnapshotDetail({ snapshot }: { snapshot: Snapshot }) {
         <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Restic ID</div><code style={{ fontSize: 12 }}>{snapshot.resticSnapshotId?.slice(0, 12) ?? "—"}</code></div>
         <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Files</div><div>{snapshot.fileCount ?? "—"}</div></div>
         <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Finished</div><div style={{ fontSize: 12 }}>{snapshot.finishedAt ? fmt(snapshot.finishedAt) : "—"}</div></div>
-        <div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>Error</div><div style={{ fontSize: 12, color: "var(--danger)" }}>{snapshot.errorMessage ?? "—"}</div></div>
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Integrity check</div>
+          <div style={{ fontSize: 12, color: snapshot.integrityCheckStatus === "failed" ? "var(--danger)" : snapshot.integrityCheckStatus === "passed" ? "var(--success, #22c55e)" : "var(--text-muted)" }}>
+            {snapshot.integrityCheckStatus ?? "—"}
+          </div>
+        </div>
       </div>
+      {snapshot.errorMessage && (
+        <div style={{ fontSize: 12, color: "var(--danger)", marginBottom: 8 }}>{snapshot.errorMessage}</div>
+      )}
       {logs.length > 0 && (
         <div style={{ background: "#0a0c12", borderRadius: "var(--radius)", padding: 10, maxHeight: 200, overflowY: "auto", fontFamily: "monospace", fontSize: 12 }}>
           {logs.map((l) => (
@@ -243,7 +352,13 @@ function SnapshotDetail({ snapshot }: { snapshot: Snapshot }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = { success: "badge-success", failed: "badge-danger", running: "badge-primary", cancelled: "badge-muted" };
+  const map: Record<string, string> = {
+    success: "badge-success",
+    failed: "badge-danger",
+    running: "badge-primary",
+    cancelled: "badge-muted",
+    warning: "badge-warning",
+  };
   return <span className={`badge ${map[status] ?? "badge-muted"}`}>{status}</span>;
 }
 

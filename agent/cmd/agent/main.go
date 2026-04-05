@@ -245,7 +245,20 @@ func handleConnection(
 			json.Unmarshal(msg["destinationId"], &destinationID)
 			go func() {
 				log.Printf("Starting restore of %s to %s", resticSnapshotID, restorePath)
-				err := handleRestore(ctx, srv, runner, resticSnapshotID, restorePath, destinationID)
+				progressCh := make(chan backup.RestoreProgress, 32)
+				go func() {
+					for p := range progressCh {
+						conn.WriteJSON(map[string]interface{}{
+							"type":       "restore_progress",
+							"snapshotId": snapshotID,
+							"percent":    p.Percent,
+							"filesDone":  p.FilesDone,
+							"filesTotal": p.FilesTotal,
+						})
+					}
+				}()
+				err := handleRestore(ctx, srv, runner, resticSnapshotID, restorePath, destinationID, progressCh)
+				close(progressCh)
 				result := map[string]interface{}{
 					"type":             "restore_result",
 					"snapshotId":       snapshotID,
@@ -439,7 +452,7 @@ func runBackup(ctx context.Context, conn *websocket.Conn, runner *backup.Runner,
 	}
 }
 
-func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, restorePath, destinationID string) error {
+func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup.Runner, resticSnapshotID, restorePath, destinationID string, progressCh chan<- backup.RestoreProgress) error {
 	// Get job configs to find the destination
 	jobs, err := srv.GetJobConfigs()
 	if err != nil {
@@ -455,7 +468,7 @@ func handleRestore(ctx context.Context, srv *client.ServerClient, runner *backup
 					Type:   d.Type,
 					Config: d.Config,
 				}
-				return runner.Restore(ctx, dest, resticSnapshotID, restorePath, job.ResticPassword)
+				return runner.Restore(ctx, dest, resticSnapshotID, restorePath, job.ResticPassword, progressCh)
 			}
 		}
 	}

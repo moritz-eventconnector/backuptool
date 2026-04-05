@@ -133,8 +133,9 @@ export const api = {
   deleteUser: (id: string) => request(`/settings/users/${id}`, { method: "DELETE" }),
 
   // Snapshot restore
-  restoreSnapshot: (id: string, restorePath: string) =>
-    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath }) }),
+  restoreSnapshot: (id: string, restorePath: string, targetAgentId?: string) =>
+    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath, targetAgentId }) }),
+  getRestoreAgents: (id: string) => request<RestoreAgent[]>(`/snapshots/${id}/restore-agents`),
 };
 
 // Types
@@ -194,11 +195,21 @@ export interface Snapshot {
   sizeBytes?: number;
   fileCount?: number;
   durationSeconds?: number;
-  status: "running" | "success" | "failed" | "cancelled";
+  status: "running" | "success" | "failed" | "cancelled" | "warning";
   errorMessage?: string;
+  integrityCheckStatus?: "passed" | "failed" | null;
   startedAt: string;
   finishedAt?: string;
   retryCount: number;
+}
+
+export interface RestoreAgent {
+  id: string;
+  name: string;
+  hostname: string;
+  status: string;
+  online: boolean;
+  isOriginal: boolean;
 }
 
 export interface SnapshotLog {
