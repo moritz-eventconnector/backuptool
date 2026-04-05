@@ -208,6 +208,14 @@ chmod +x "$TMP"
 mv "$TMP" "$BIN"
 echo "  Installed to $BIN"
 
+# ── Stop any existing agent service ───────────────────────────────────────
+if [ "$OS" = "linux" ] && command -v systemctl &>/dev/null; then
+  systemctl stop backuptool-agent 2>/dev/null || true
+fi
+if [ "$OS" = "darwin" ]; then
+  launchctl unload /Library/LaunchDaemons/com.backuptool.agent.plist 2>/dev/null || true
+fi
+
 # ── Create data directory ──────────────────────────────────────────────────
 mkdir -p "$DATA_DIR"
 
@@ -220,13 +228,11 @@ echo "Registering agent..."
        --config "$DATA_DIR/agent.yaml"
 echo "  Registration complete."
 
-# ── Linux: create service user + systemd unit ─────────────────────────────
-if [ "$OS" = "linux" ] && command -v systemctl &>/dev/null; then
-  if ! id "$SERVICE_USER" &>/dev/null; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null || true
-  fi
-  chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+# ── Create default local repo directory (always writable) ─────────────────
+mkdir -p "$DATA_DIR/repos"
 
+# ── Linux: systemd unit (runs as root so it can read all source files) ────
+if [ "$OS" = "linux" ] && command -v systemctl &>/dev/null; then
   cat > /etc/systemd/system/backuptool-agent.service <<EOF
 [Unit]
 Description=BackupTool Backup Agent
@@ -236,18 +242,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
+User=root
 ExecStart=$BIN --server $SERVER --config $DATA_DIR/agent.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=backuptool-agent
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=$DATA_DIR
 
 [Install]
 WantedBy=multi-user.target

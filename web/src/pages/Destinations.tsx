@@ -15,7 +15,7 @@ const DESTINATION_TYPES = [
   { value: "rclone", label: "Rclone (70+ providers)" },
 ];
 
-const CONFIG_FIELDS: Record<string, Array<{ key: string; label: string; type?: string; placeholder?: string }>> = {
+const CONFIG_FIELDS: Record<string, Array<{ key: string; label: string; type?: string; placeholder?: string; defaultValue?: string }>> = {
   s3: [
     { key: "bucket", label: "Bucket Name", placeholder: "my-backup-bucket" },
     { key: "region", label: "Region", placeholder: "us-east-1" },
@@ -30,7 +30,7 @@ const CONFIG_FIELDS: Record<string, Array<{ key: string; label: string; type?: s
     { key: "bucket", label: "Bucket Name" },
     { key: "path", label: "Path Prefix (optional)" },
   ],
-  local: [{ key: "path", label: "Local Path", placeholder: "/mnt/backup" }],
+  local: [{ key: "path", label: "Local Path", placeholder: "/var/lib/backuptool-agent/repos/myjob", defaultValue: "/var/lib/backuptool-agent/repos/" }],
   sftp: [
     { key: "host", label: "Host" },
     { key: "port", label: "Port", placeholder: "22" },
@@ -77,11 +77,21 @@ export default function Destinations() {
 
   const configFields = CONFIG_FIELDS[type] ?? [{ key: "config", label: "Configuration (JSON)" }];
 
+  // When type changes, pre-fill fields that have a defaultValue
+  const handleTypeChange = (newType: string) => {
+    setType(newType);
+    const defaults: Record<string, string> = {};
+    for (const f of CONFIG_FIELDS[newType] ?? []) {
+      if (f.defaultValue) defaults[f.key] = f.defaultValue;
+    }
+    setFields(defaults);
+  };
+
   return (
     <div>
       <div className="page-header">
         <h1>Destinations</h1>
-        <button className="btn-primary" onClick={() => setShowForm(true)}>
+        <button className="btn-primary" onClick={() => { setShowForm(true); setType("s3"); setFields({}); setName(""); setError(""); }}>
           <Plus size={15} style={{ marginRight: 6 }} />Add Destination
         </button>
       </div>
@@ -126,7 +136,7 @@ export default function Destinations() {
               </div>
               <div className="form-group">
                 <label>Type</label>
-                <select value={type} onChange={(e) => { setType(e.target.value); setFields({}); }}>
+                <select value={type} onChange={(e) => handleTypeChange(e.target.value)}>
                   {DESTINATION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
@@ -140,6 +150,13 @@ export default function Destinations() {
                   )}
                 </div>
               ))}
+              {type === "local" && (
+                <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 8 }}>
+                  <strong>Local path:</strong> must be writable by the agent service user (<code>backuptool</code>).
+                  Recommended: <code>/var/lib/backuptool-agent/repos/</code> or a mounted volume accessible to that user.
+                  Run <code>chown -R backuptool:backuptool /your/path</code> if needed.
+                </div>
+              )}
               <div className="alert alert-info" style={{ fontSize: 12 }}>
                 Credentials are encrypted with AES-256-GCM before storage.
               </div>
