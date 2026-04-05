@@ -152,6 +152,11 @@ tbody tr:hover { background: var(--bg-hover); }
 .modal-footer {
   display: flex; justify-content: flex-end; gap: 10px;
   margin-top: 20px;
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0 0;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
 }
 
 .stat-grid {

@@ -2,12 +2,14 @@ package backup
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -203,21 +205,75 @@ func (r *Runner) Run(
 	}, nil
 }
 
-// Restore runs restic restore for a given snapshot.
-func (r *Runner) Restore(ctx context.Context, dest *Destination, resticSnapshotID, targetPath, password string) error {
+// RestoreProgress carries live progress updates during a restore.
+type RestoreProgress struct {
+	Percent    float64
+	FilesDone  int
+	FilesTotal int
+	BytesDone  int64
+	BytesTotal int64
+}
+
+var restoreProgressRe = regexp.MustCompile(`([\d.]+)%\s+([\d,]+)\s*/\s*([\d,]+)`)
+
+// Restore runs restic restore for a given snapshot with live progress reporting.
+// progressCh receives updates parsed from restic's verbose stderr output.
+func (r *Runner) Restore(ctx context.Context, dest *Destination, resticSnapshotID, targetPath, password string, progressCh chan<- RestoreProgress) error {
 	repoURL, env, err := r.buildRepoURLAndEnv(dest)
 	if err != nil {
 		return err
 	}
 	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
 
-	cmd := exec.CommandContext(ctx, r.ResticBin, "restore", resticSnapshotID, "--target", targetPath)
+	cmd := exec.CommandContext(ctx, r.ResticBin, "restore", resticSnapshotID, "--target", targetPath, "--verbose")
 	cmd.Env = append(os.Environ(), env...)
-	out, err := cmd.CombinedOutput()
+
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("restic restore failed: %v\n%s", err, string(out))
+		return err
+	}
+	stdout := &bytes.Buffer{}
+	cmd.Stdout = stdout
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start restic restore: %w", err)
+	}
+
+	// restic restore writes progress lines to stderr separated by \r or \n
+	scanner := bufio.NewScanner(stderr)
+	scanner.Split(splitOnCRorLF)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if progressCh != nil {
+			if m := restoreProgressRe.FindStringSubmatch(line); m != nil {
+				pct, _ := strconv.ParseFloat(m[1], 64)
+				done, _ := strconv.Atoi(strings.ReplaceAll(m[2], ",", ""))
+				total, _ := strconv.Atoi(strings.ReplaceAll(m[3], ",", ""))
+				select {
+				case progressCh <- RestoreProgress{Percent: pct, FilesDone: done, FilesTotal: total}:
+				default:
+				}
+			}
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("restic restore failed: %v\n%s", err, stdout.String())
 	}
 	return nil
+}
+
+// splitOnCRorLF is a bufio.SplitFunc that splits on \r or \n.
+func splitOnCRorLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for i, b := range data {
+		if b == '\r' || b == '\n' {
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // ListFiles lists files in a specific snapshot at a given path.
@@ -418,16 +474,25 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 
 	case "b2":
 		// Use S3-compatible API (recommended). Fields: endpoint, bucket, accessKeyId, secretAccessKey, path.
-		// Legacy native B2 fields (accountId / applicationKey) are also supported as fallback.
+		// Legacy native B2 fields (accountId / applicationKey / keyId) are also supported as fallback.
 		bucket := get("bucket")
 		path := strings.TrimPrefix(get("path"), "/")
 		endpoint := get("endpoint")
+
+		// Support multiple possible key field names (old and new form versions)
 		accessKey := get("accessKeyId")
+		if accessKey == "" {
+			accessKey = get("keyId")
+		}
 		secretKey := get("secretAccessKey")
+		if secretKey == "" {
+			secretKey = get("applicationKey")
+		}
 
 		if endpoint != "" && accessKey != "" {
-			// S3-compatible path (new style)
-			repoURL := "s3:" + endpoint + "/" + bucket
+			// S3-compatible path — strip any https:// prefix restic adds its own scheme
+			ep := strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+			repoURL := "s3:" + ep + "/" + bucket
 			if path != "" {
 				repoURL += "/" + path
 			}
@@ -438,14 +503,22 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 			return repoURL, env, nil
 		}
 
-		// Native B2 fallback (legacy)
+		// Native B2 fallback (legacy — no endpoint configured)
+		accountID := get("accountId")
+		if accountID == "" {
+			accountID = get("keyId")
+		}
+		appKey := get("applicationKey")
+		if appKey == "" {
+			appKey = get("secretAccessKey")
+		}
 		repoURL := "b2:" + bucket
 		if path != "" {
 			repoURL += "/" + path
 		}
 		env := []string{
-			"B2_ACCOUNT_ID=" + get("accountId"),
-			"B2_ACCOUNT_KEY=" + get("applicationKey"),
+			"B2_ACCOUNT_ID=" + accountID,
+			"B2_ACCOUNT_KEY=" + appKey,
 		}
 		return repoURL, env, nil
 

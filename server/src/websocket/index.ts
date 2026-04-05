@@ -159,6 +159,11 @@ export function initWebSocket(server: Server): WebSocketServer {
           return;
         }
 
+        if (msg.type === "restore_progress") {
+          broadcastToUi({ type: "restore_progress", agentId, ...msg });
+          return;
+        }
+
         if (msg.type === "restore_result") {
           const snapshotId = msg.snapshotId as string;
           const status = msg.status as string;
@@ -198,9 +203,15 @@ export function initWebSocket(server: Server): WebSocketServer {
                 : `Integrity check FAILED: ${checkMessage}`,
             }).run();
 
-            // Persist check status on the snapshot row
+            // Persist check status; if failed, downgrade snapshot to "warning"
+            const snapUpdate: Record<string, unknown> = { integrityCheckStatus: checkStatus };
+            if (checkStatus === "failed") {
+              // Only downgrade from success — don't overwrite a "failed" backup status
+              const [cur] = db.select({ status: snapshots.status }).from(snapshots).where(eq(snapshots.id, snapshotId)).all();
+              if (cur?.status === "success") snapUpdate.status = "warning";
+            }
             db.update(snapshots)
-              .set({ integrityCheckStatus: checkStatus })
+              .set(snapUpdate as Parameters<ReturnType<typeof db.update>["set"]>[0])
               .where(eq(snapshots.id, snapshotId))
               .run();
 
