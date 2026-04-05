@@ -114,6 +114,20 @@ agentsRouter.post("/register", async (req, res) => {
   });
 });
 
+// POST /api/agents/:id/update — push update command to a running agent
+agentsRouter.post("/:id/update", requireAuth, requireRole("admin", "operator"), (req, res) => {
+  if (!isAgentOnline(req.params.id)) {
+    res.status(503).json({ error: "Agent is offline. Restart the agent service manually and it will auto-update on startup." });
+    return;
+  }
+  const sent = sendToAgent(req.params.id, { type: "update_binary" });
+  if (!sent) {
+    res.status(503).json({ error: "Failed to send update command" });
+    return;
+  }
+  res.json({ message: "Update command sent. Agent will restart with the new binary in a few seconds." });
+});
+
 // DELETE /api/agents/:id
 agentsRouter.delete("/:id", requireAuth, requireRole("admin"), (req, res) => {
   const db = getDb();

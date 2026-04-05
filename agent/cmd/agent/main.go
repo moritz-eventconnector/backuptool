@@ -314,6 +314,19 @@ func handleConnection(
 				}
 			}()
 
+		case "update_binary":
+			log.Println("Received update command from server — checking for newer binary…")
+			conn.WriteJSON(map[string]string{"type": "update_ack", "status": "checking"})
+			go func() {
+				time.Sleep(200 * time.Millisecond) // let ack reach server
+				// selfUpdate replaces the binary and re-execs; if no update is
+				// available it returns false and the agent keeps running.
+				if !selfUpdate(srv) {
+					conn.WriteJSON(map[string]string{"type": "update_ack", "status": "already_current"})
+				}
+				// If selfUpdate succeeds it re-execs and never returns here.
+			}()
+
 		case "uninstall":
 			log.Println("Received uninstall command — removing agent from this system...")
 			conn.WriteJSON(map[string]string{"type": "uninstall_ack"})

@@ -442,7 +442,7 @@ func (r *Runner) applyRetention(ctx context.Context, policy RetentionPolicy, rep
 func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error) {
 	get := func(key string) string {
 		v, _ := dest.Config[key].(string)
-		return v
+		return strings.TrimSpace(v)
 	}
 
 	switch dest.Type {

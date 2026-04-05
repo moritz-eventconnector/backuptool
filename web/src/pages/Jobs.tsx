@@ -119,7 +119,7 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
   const [selectedSvcs, setSelectedSvcs] = useState<DiscoveredService[]>([]);
   const [svcFilter, setSvcFilter] = useState<string>("all");
   const [showAllSvcs, setShowAllSvcs] = useState(false);
-  const [extraPaths, setExtraPaths] = useState(job?.sourcePaths.join("\n") ?? "");
+  const [extraPaths, setExtraPaths] = useState((job?.sourcePaths ?? []).join("\n"));
 
   // Combine paths from selected services + manually added paths (deduplicated)
   const combinedPaths = useMemo(() => {
@@ -163,7 +163,7 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
   const [keepMonthly, setKeepMonthly] = useState(job?.retention?.keepMonthly?.toString() ?? "12");
   const [preScript, setPreScript] = useState(job?.preScript ?? "");
   const [postScript, setPostScript] = useState(job?.postScript ?? "");
-  const [excludePatterns, setExcludePatterns] = useState(job?.excludePatterns.join("\n") ?? "");
+  const [excludePatterns, setExcludePatterns] = useState((job?.excludePatterns ?? []).join("\n"));
   const [enabled, setEnabled] = useState(job?.enabled ?? true);
   const [wormEnabled, setWormEnabled] = useState(job?.wormEnabled ?? false);
   const [wormDays, setWormDays] = useState(job?.wormRetentionDays?.toString() ?? "30");
@@ -260,7 +260,7 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
                     const sel = selectedSvcs.some((s) => s.name === svc.name);
                     return (
                       <button key={svc.name} type="button"
-                        title={svc.note || svc.sourcePaths.join(", ")}
+                        title={svc.note || (svc.sourcePaths ?? []).join(", ")}
                         onClick={() => toggleSvc(svc)}
                         style={{
                           display: "flex", alignItems: "center", gap: 6, padding: "6px 10px",

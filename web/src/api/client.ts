@@ -64,6 +64,7 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: "DELETE" }),
+  updateAgent: (id: string) => request<{ message: string }>(`/agents/${id}/update`, { method: "POST" }),
   getDiscoveredServices: (id: string) => request<DiscoveredService[]>(`/agents/${id}/discovered`),
 
   // Jobs
