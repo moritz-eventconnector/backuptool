@@ -85,8 +85,11 @@ export const api = {
 
   // Destinations
   listDestinations: () => request<Destination[]>("/destinations"),
+  getDestination: (id: string) => request<Destination & { config: Record<string, string> }>(`/destinations/${id}`),
   createDestination: (data: { name: string; type: string; config: Record<string, unknown> }) =>
     request<Destination>("/destinations", { method: "POST", body: JSON.stringify(data) }),
+  updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown> }) =>
+    request(`/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteDestination: (id: string) => request(`/destinations/${id}`, { method: "DELETE" }),
 
   // License

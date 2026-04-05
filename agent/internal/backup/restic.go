@@ -417,8 +417,28 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 		return repoURL, env, nil
 
 	case "b2":
+		// Use S3-compatible API (recommended). Fields: endpoint, bucket, accessKeyId, secretAccessKey, path.
+		// Legacy native B2 fields (accountId / applicationKey) are also supported as fallback.
 		bucket := get("bucket")
 		path := strings.TrimPrefix(get("path"), "/")
+		endpoint := get("endpoint")
+		accessKey := get("accessKeyId")
+		secretKey := get("secretAccessKey")
+
+		if endpoint != "" && accessKey != "" {
+			// S3-compatible path (new style)
+			repoURL := "s3:" + endpoint + "/" + bucket
+			if path != "" {
+				repoURL += "/" + path
+			}
+			env := []string{
+				"AWS_ACCESS_KEY_ID=" + accessKey,
+				"AWS_SECRET_ACCESS_KEY=" + secretKey,
+			}
+			return repoURL, env, nil
+		}
+
+		// Native B2 fallback (legacy)
 		repoURL := "b2:" + bucket
 		if path != "" {
 			repoURL += "/" + path

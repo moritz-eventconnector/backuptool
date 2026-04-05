@@ -159,6 +159,27 @@ export function initWebSocket(server: Server): WebSocketServer {
           return;
         }
 
+        if (msg.type === "restore_result") {
+          const snapshotId = msg.snapshotId as string;
+          const status = msg.status as string;
+          const restorePath = msg.restorePath as string;
+          const errorMessage = msg.errorMessage as string | undefined;
+          logger.info({ agentId, snapshotId, status, restorePath }, "Restore result received");
+          if (snapshotId) {
+            const db = getDb();
+            db.insert(snapshotLogs).values({
+              id: nanoid(),
+              snapshotId,
+              level: status === "success" ? "info" : "error",
+              message: status === "success"
+                ? `Restore completed successfully → ${restorePath}`
+                : `Restore failed: ${errorMessage}`,
+            }).run();
+          }
+          broadcastToUi({ type: "restore_result", agentId, ...msg });
+          return;
+        }
+
         if (msg.type === "check_result") {
           const db = getDb();
           const snapshotId = msg.snapshotId as string;
