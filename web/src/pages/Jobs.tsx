@@ -197,6 +197,7 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
         wormEnabled,
         wormRetentionDays: parseInt(wormDays) || 0,
       };
+      console.log("[job submit] data:", JSON.stringify({ ...data, preScript: data.preScript?.slice(0, 100), postScript: data.postScript?.slice(0, 100) }, null, 2));
       if (job) await api.updateJob(job.id, data);
       else await api.createJob(data);
       onSaved();

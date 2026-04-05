@@ -142,7 +142,7 @@ chmod 600 /tmp/backuptool-mysql-dump.sql`,
 			Name:        "Redis",
 			Type:        "database",
 			SourcePaths: paths,
-			PreScript:   `#!/usr/bin/env bash\nredis-cli BGSAVE\nsleep 2`,
+			PreScript: "#!/usr/bin/env bash\nredis-cli BGSAVE\nsleep 2",
 			Note:        "Triggers a BGSAVE before backup to ensure the .rdb dump is current.",
 			Priority:    "critical",
 		})

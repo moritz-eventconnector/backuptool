@@ -73,7 +73,7 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
       .map(([f, errs]) => `${f}: ${(errs as string[]).join(", ")}`)
       .join("; ");
     const msg = fieldErrors || flat.formErrors.join("; ") || "Invalid input";
-    logger.warn({ errors: flat }, "Job creation validation failed");
+    logger.warn({ errors: flat, body: { ...req.body, preScript: req.body.preScript?.slice?.(0, 200), postScript: req.body.postScript?.slice?.(0, 200) } }, "Job creation validation failed");
     res.status(400).json({ error: msg, details: flat });
     return;
   }
