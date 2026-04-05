@@ -137,14 +137,16 @@ export default function Snapshots() {
                       {allChecked ? "Deselect all" : "Select all"}
                     </button>
                   </div>
-                  <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "6px 8px" }}>
+                  <div style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "4px 8px", maxHeight: 220, overflowY: "auto" }}>
                     {sourcePaths.map((p) => (
-                      <label key={p} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", cursor: "pointer" }}>
-                        <input type="checkbox" checked={selectedPaths.includes(p)}
+                      <label key={p} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 4px", cursor: "pointer", width: "100%", boxSizing: "border-box" }}>
+                        <input type="checkbox"
+                          style={{ flexShrink: 0, width: 15, height: 15, cursor: "pointer", accentColor: "var(--primary)" }}
+                          checked={selectedPaths.includes(p)}
                           onChange={(e) => setSelectedPaths((prev) =>
                             e.target.checked ? [...prev, p] : prev.filter((x) => x !== p)
                           )} />
-                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>{p}</span>
+                        <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{p}</span>
                       </label>
                     ))}
                   </div>
