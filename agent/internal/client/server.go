@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -182,6 +183,73 @@ func (c *ServerClient) GetJobConfigs() ([]JobConfig, error) {
 		return nil, err
 	}
 	return jobs, nil
+}
+
+// UpdateInfo is the response from the server's binary-hash endpoint.
+type UpdateInfo struct {
+	Hash string `json:"hash"`
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+}
+
+// CheckUpdate fetches the SHA-256 hash of the server's current agent binary.
+func (c *ServerClient) CheckUpdate(goos, arch string) (*UpdateInfo, error) {
+	url := fmt.Sprintf("%s/api/internal/agents/%s/update/hash?os=%s&arch=%s", c.ServerURL, c.AgentID, goos, arch)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.ApiToken)
+	req.Header.Set("X-Agent-ID", c.AgentID)
+
+	resp, err := c.httpCli.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // binary not available, skip update
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("check update failed (%d): %s", resp.StatusCode, string(body))
+	}
+	var info UpdateInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// DownloadUpdate downloads the agent binary from the server to the given path.
+func (c *ServerClient) DownloadUpdate(goos, arch, destPath string) error {
+	url := fmt.Sprintf("%s/api/internal/agents/%s/update/binary?os=%s&arch=%s", c.ServerURL, c.AgentID, goos, arch)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.ApiToken)
+	req.Header.Set("X-Agent-ID", c.AgentID)
+
+	resp, err := c.httpCli.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("download update failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return fmt.Errorf("write binary: %w", err)
+	}
+	return nil
 }
 
 // ConnectWebSocket establishes a WebSocket connection and authenticates as an agent.

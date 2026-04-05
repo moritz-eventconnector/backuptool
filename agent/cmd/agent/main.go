@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	sha256hash "crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -109,6 +111,14 @@ func main() {
 	srv, err := client.NewServerClient(cfg.ServerURL, cfg.AgentID, cfg.ApiToken, cfg.CertPEM, cfg.KeyPEM, cfg.CACertPEM)
 	if err != nil {
 		log.Fatalf("Create server client: %v", err)
+	}
+
+	// ── Self-update check ─────────────────────────────────────────────────────
+	// Check if the server has a newer binary. If so, download it, replace the
+	// current executable, and re-exec so the new code runs immediately.
+	if updated := selfUpdate(srv); updated {
+		// re-exec is handled inside selfUpdate; this return is a safety fallback.
+		return
 	}
 
 	// ── Cron scheduler ───────────────────────────────────────────────────────
@@ -620,4 +630,96 @@ func uninstallSelf() {
 	}
 
 	log.Println("Agent uninstalled.")
+}
+
+// selfUpdate checks whether the server has a newer agent binary (by SHA-256 hash).
+// If it does, the new binary is downloaded, written next to the current executable,
+// atomically replaced, and the process re-execs itself with the same arguments.
+// Returns true if an update was applied (caller should return after this).
+func selfUpdate(srv *client.ServerClient) bool {
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Printf("Self-update: cannot determine executable path: %v", err)
+		return false
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		log.Printf("Self-update: cannot resolve symlinks: %v", err)
+		return false
+	}
+
+	// Compute hash of the currently running binary.
+	currentHash, err := sha256File(execPath)
+	if err != nil {
+		log.Printf("Self-update: cannot hash current binary: %v", err)
+		return false
+	}
+
+	// Ask the server what hash the latest binary has.
+	info, err := srv.CheckUpdate(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		log.Printf("Self-update: check failed (continuing with current binary): %v", err)
+		return false
+	}
+	if info == nil || info.Hash == "" || info.Hash == currentHash {
+		// No update available.
+		return false
+	}
+
+	log.Printf("Self-update: new binary available (server=%s current=%s) — downloading…", info.Hash[:12], currentHash[:12])
+
+	// Download to a temp file in the same directory so os.Rename is atomic.
+	tmpPath := execPath + ".new"
+	if err := srv.DownloadUpdate(runtime.GOOS, runtime.GOARCH, tmpPath); err != nil {
+		log.Printf("Self-update: download failed: %v", err)
+		os.Remove(tmpPath)
+		return false
+	}
+
+	// Make the new binary executable.
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		log.Printf("Self-update: chmod failed: %v", err)
+		os.Remove(tmpPath)
+		return false
+	}
+
+	// Verify the downloaded file's hash matches what the server advertised.
+	downloadedHash, err := sha256File(tmpPath)
+	if err != nil || downloadedHash != info.Hash {
+		log.Printf("Self-update: hash mismatch after download (expected %s, got %s) — aborting", info.Hash, downloadedHash)
+		os.Remove(tmpPath)
+		return false
+	}
+
+	// Atomically replace the current binary.
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		log.Printf("Self-update: rename failed: %v", err)
+		os.Remove(tmpPath)
+		return false
+	}
+
+	log.Printf("Self-update: binary replaced — re-executing…")
+
+	// Re-exec the new binary with the same arguments.
+	args := os.Args
+	env := os.Environ()
+	if err := syscall.Exec(execPath, args, env); err != nil {
+		log.Printf("Self-update: re-exec failed: %v — continuing with old binary", err)
+		return false
+	}
+	return true // unreachable on success, but satisfies the compiler
+}
+
+// sha256File computes the SHA-256 hex digest of the file at path.
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256hash.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }

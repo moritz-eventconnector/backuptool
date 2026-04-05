@@ -5,11 +5,26 @@
  */
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
+import { createHash } from "crypto";
+import { createReadStream, existsSync } from "fs";
+import path from "path";
 import { getDb } from "../db/index.js";
 import { agents, backupJobs, destinations } from "../db/schema/index.js";
 import { eq, inArray } from "drizzle-orm";
 import { decrypt, sha256 } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
+
+/** Compute SHA-256 hex digest of a file, or null if the file doesn't exist. */
+async function sha256File(filePath: string): Promise<string | null> {
+  if (!existsSync(filePath)) return null;
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("data", (chunk: string | Buffer) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
 
 export const internalRouter = Router();
 
@@ -147,4 +162,35 @@ internalRouter.get("/agents/:agentId/jobs/:jobId", requireAgentAuth, (req, res) 
     wormEnabled: job.wormEnabled ?? false,
     wormRetentionDays: job.wormRetentionDays ?? 0,
   });
+});
+
+// GET /api/internal/agents/:agentId/update/hash?os=linux&arch=amd64
+// Agent calls this on startup to check if a newer binary is available.
+internalRouter.get("/agents/:agentId/update/hash", requireAgentAuth, async (req, res) => {
+  const os = (req.query.os as string) || "linux";
+  const arch = (req.query.arch as string) || "amd64";
+  const ext = os === "windows" ? ".exe" : "";
+  const filename = `agent-${os}-${arch}${ext}`;
+  const localPath = path.join(process.cwd(), "binaries", filename);
+  const hash = await sha256File(localPath);
+  if (!hash) {
+    res.status(404).json({ error: "Binary not available on server" });
+    return;
+  }
+  res.json({ hash, os, arch });
+});
+
+// GET /api/internal/agents/:agentId/update/binary?os=linux&arch=amd64
+// Agent downloads the updated binary when hash differs.
+internalRouter.get("/agents/:agentId/update/binary", requireAgentAuth, (req, res) => {
+  const os = (req.query.os as string) || "linux";
+  const arch = (req.query.arch as string) || "amd64";
+  const ext = os === "windows" ? ".exe" : "";
+  const filename = `agent-${os}-${arch}${ext}`;
+  const localPath = path.join(process.cwd(), "binaries", filename);
+  if (!existsSync(localPath)) {
+    res.status(404).json({ error: "Binary not available on server" });
+    return;
+  }
+  res.download(localPath, filename);
 });
