@@ -238,14 +238,29 @@ func handleConnection(
 			syncJobs(ctx, srv, scheduler, runner, conn)
 
 		case "restore":
-			var resticSnapshotID, restorePath, destinationID string
+			var snapshotID, resticSnapshotID, restorePath, destinationID string
+			json.Unmarshal(msg["snapshotId"], &snapshotID)
 			json.Unmarshal(msg["resticSnapshotId"], &resticSnapshotID)
 			json.Unmarshal(msg["restorePath"], &restorePath)
 			json.Unmarshal(msg["destinationId"], &destinationID)
 			go func() {
-				if err := handleRestore(ctx, srv, runner, resticSnapshotID, restorePath, destinationID); err != nil {
-					log.Printf("Restore failed: %v", err)
+				log.Printf("Starting restore of %s to %s", resticSnapshotID, restorePath)
+				err := handleRestore(ctx, srv, runner, resticSnapshotID, restorePath, destinationID)
+				result := map[string]interface{}{
+					"type":             "restore_result",
+					"snapshotId":       snapshotID,
+					"resticSnapshotId": resticSnapshotID,
+					"restorePath":      restorePath,
 				}
+				if err != nil {
+					result["status"] = "failed"
+					result["errorMessage"] = err.Error()
+					log.Printf("Restore failed: %v", err)
+				} else {
+					result["status"] = "success"
+					log.Printf("Restore complete: %s → %s", resticSnapshotID, restorePath)
+				}
+				conn.WriteJSON(result)
 			}()
 
 		case "list_files":

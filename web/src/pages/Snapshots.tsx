@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Snapshot, type SnapshotLog } from "../api/client.ts";
 import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock } from "lucide-react";
+import { config } from "../config.ts";
 
 export default function Snapshots() {
   const qc = useQueryClient();
@@ -14,11 +15,38 @@ export default function Snapshots() {
   const [restorePath, setRestorePath] = useState("");
   const [restoreMode, setRestoreMode] = useState<"original" | "custom">("original");
   const [restoreMsg, setRestoreMsg] = useState("");
+  const [restoreRunning, setRestoreRunning] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // WebSocket — listen for restore_result while on this page
+  useEffect(() => {
+    const ws = new WebSocket(config.wsUrl);
+    wsRef.current = ws;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "ui_connect" }));
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "restore_result") {
+          setRestoreRunning(false);
+          if (msg.status === "success") {
+            setRestoreMsg(`Restore completed successfully. Files are at: ${msg.restorePath}`);
+          } else {
+            setRestoreMsg(`Restore failed: ${msg.errorMessage ?? "unknown error"}`);
+          }
+          qc.invalidateQueries({ queryKey: ["snapshot-logs", msg.snapshotId] });
+        }
+      } catch { /**/ }
+    };
+    return () => ws.close();
+  }, [qc]);
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
   const restoreMut = useMutation({
     mutationFn: ({ id, path }: { id: string; path: string }) => api.restoreSnapshot(id, path),
-    onSuccess: () => { setRestoreMsg("Restore triggered successfully."); },
+    onSuccess: () => {
+      setRestoreRunning(true);
+      setRestoreMsg("Restore running on agent — this may take a few minutes…");
+    },
     onError: (e: Error) => { setRestoreMsg(`Error: ${e.message}`); },
   });
 
@@ -78,18 +106,26 @@ export default function Snapshots() {
                   Files will be restored to their <strong style={{ color: "var(--warning, #f59e0b)" }}>original paths</strong> on the agent host. Existing files may be overwritten.
                 </div>
               ) : (
-                <div className="form-group">
-                  <label>Restore to path</label>
+                <div className="form-group" style={{ marginBottom: 6 }}>
+                  <label>Restore to directory</label>
                   <input value={restorePath} onChange={(e) => setRestorePath(e.target.value)} placeholder="/tmp/restore" autoFocus />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                    restic preserves the full path structure inside this directory.
+                    E.g. <code>/etc/bind/named.conf</code> → <code>{restorePath || "/tmp/restore"}/etc/bind/named.conf</code>
+                  </div>
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn-primary" disabled={(restoreMode === "custom" && !restorePath) || restoreMut.isPending}
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button className="btn-primary"
+                  disabled={(restoreMode === "custom" && !restorePath) || restoreMut.isPending || restoreRunning}
                   onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath }); }}>
-                  {restoreMut.isPending ? "Restoring…" : "Restore"}
+                  {restoreRunning ? <><span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} />Restoring…</> : "Restore"}
                 </button>
-                <button className="btn-ghost" onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); }}>Cancel</button>
+                <button className="btn-ghost"
+                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); }}>
+                  {restoreRunning ? "Close" : "Cancel"}
+                </button>
               </div>
             </div>
           </div>
