@@ -208,6 +208,14 @@ chmod +x "$TMP"
 mv "$TMP" "$BIN"
 echo "  Installed to $BIN"
 
+# ── Stop any existing agent service ───────────────────────────────────────
+if [ "$OS" = "linux" ] && command -v systemctl &>/dev/null; then
+  systemctl stop backuptool-agent 2>/dev/null || true
+fi
+if [ "$OS" = "darwin" ]; then
+  launchctl unload /Library/LaunchDaemons/com.backuptool.agent.plist 2>/dev/null || true
+fi
+
 # ── Create data directory ──────────────────────────────────────────────────
 mkdir -p "$DATA_DIR"
 

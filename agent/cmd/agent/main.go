@@ -44,6 +44,14 @@ func main() {
 		cfg.ServerURL = *serverURL
 	}
 	if *agentID != "" {
+		// If the saved config is for a DIFFERENT agent ID, discard it so we
+		// re-register with the new credentials. This handles the case where the
+		// install script is run again with a fresh token for a new agent entry.
+		if cfg.AgentID != "" && cfg.AgentID != *agentID {
+			log.Printf("Agent ID changed (%s → %s), clearing old config", cfg.AgentID, *agentID)
+			cfg = ptr(config.DefaultConfig())
+			cfg.ServerURL = *serverURL
+		}
 		cfg.AgentID = *agentID
 	}
 	if *regToken != "" {
