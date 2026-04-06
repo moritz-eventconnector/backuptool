@@ -1,7 +1,8 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw, Upload } from "lucide-react";
+import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw } from "lucide-react";
+import { useWsEvent } from "../context/WebSocketContext.tsx";
 
 type OsTab = "linux" | "windows" | "manual";
 
@@ -31,15 +32,18 @@ export default function Agents() {
   });
   const [updateMsg, setUpdateMsg] = useState<Record<string, string>>({});
 
-  // Binary upload
-  const [uploadOs, setUploadOs] = useState("linux");
-  const [uploadArch, setUploadArch] = useState("amd64");
-  const [uploadMsg, setUploadMsg] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadMut = useMutation({
-    mutationFn: ({ os, arch, file }: { os: string; arch: string; file: File }) => api.uploadAgentBinary(os, arch, file),
-    onSuccess: (d) => setUploadMsg(`✓ ${d.message}`),
-    onError: (e: Error) => setUploadMsg(`Error: ${e.message}`),
+  // Refresh agent list on status changes and show update results inline
+  useWsEvent(["agent_status", "update_ack"], (msg) => {
+    if (msg.type === "agent_status") {
+      qc.invalidateQueries({ queryKey: ["agents"] });
+    } else if (msg.type === "update_ack") {
+      const id = msg.agentId as string;
+      const status = msg.status as string;
+      setUpdateMsg((m) => ({
+        ...m,
+        [id]: status === "already_current" ? "Already up to date." : "Updating — agent will reconnect shortly…",
+      }));
+    }
   });
 
   const serverOrigin = window.location.origin;
@@ -125,48 +129,6 @@ export default function Agents() {
           </table>
         </div>
       )}
-
-      {/* Binary Upload Section */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <Upload size={15} color="var(--primary)" />
-          <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Upload Agent Binary</h3>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Place a new binary here, then use the update button (↺) per agent to push it.</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <select value={uploadOs} onChange={(e) => setUploadOs(e.target.value)} style={{ width: 110 }}>
-            <option value="linux">linux</option>
-            <option value="darwin">darwin</option>
-            <option value="windows">windows</option>
-          </select>
-          <select value={uploadArch} onChange={(e) => setUploadArch(e.target.value)} style={{ width: 100 }}>
-            <option value="amd64">amd64</option>
-            <option value="arm64">arm64</option>
-          </select>
-          <input ref={fileInputRef} type="file" style={{ display: "none" }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              setUploadMsg("");
-              uploadMut.mutate({ os: uploadOs, arch: uploadArch, file });
-              e.target.value = "";
-            }} />
-          <button className="btn-primary" style={{ fontSize: 13 }}
-            disabled={uploadMut.isPending}
-            onClick={() => fileInputRef.current?.click()}>
-            {uploadMut.isPending ? <><span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} />Uploading…</> : <><Upload size={13} style={{ marginRight: 6 }} />Choose file…</>}
-          </button>
-          {uploadMsg && (
-            <span style={{ fontSize: 12, color: uploadMsg.startsWith("Error") ? "var(--danger)" : "var(--success, #22c55e)" }}>
-              {uploadMsg}
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-          Expected filename on disk: <code>agent-{uploadOs}-{uploadArch}{uploadOs === "windows" ? ".exe" : ""}</code>
-          {" · "}Build with: <code>cd agent &amp;&amp; GOOS={uploadOs} GOARCH={uploadArch} go build -o agent-{uploadOs}-{uploadArch}{uploadOs === "windows" ? ".exe" : ""} ./cmd/agent</code>
-        </div>
-      </div>
 
       {/* Add Agent Modal */}
       {showAdd && (

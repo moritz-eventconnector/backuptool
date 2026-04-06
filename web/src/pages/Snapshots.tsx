@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Snapshot, type SnapshotLog, type RestoreAgent } from "../api/client.ts";
 import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock, Square, CheckSquare } from "lucide-react";
-import { config } from "../config.ts";
+import { useWsEvent } from "../context/WebSocketContext.tsx";
 
 // Live backup progress received via WebSocket: keyed by snapshotId
 type BackupProgress = { percent: number; filesDone: number; filesTotal: number; bytesDone: number; bytesTotal: number };
@@ -27,64 +27,52 @@ export default function Snapshots() {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [customInclude, setCustomInclude] = useState("");
   const [backupProgress, setBackupProgress] = useState<Record<string, BackupProgress>>({});
-  const wsRef = useRef<WebSocket | null>(null);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLockDays, setBulkLockDays] = useState("30");
   const [bulkMsg, setBulkMsg] = useState("");
 
-  // WebSocket — listen for progress and results while on this page
-  useEffect(() => {
-    const ws = new WebSocket(config.wsUrl);
-    wsRef.current = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ type: "ui_connect" }));
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "restore_result") {
-          setRestoreRunning(false);
-          setRestorePercent(null);
-          if (msg.status === "success") {
-            setRestoreMsg(`Restore completed successfully. Files are at: ${msg.restorePath}`);
-          } else {
-            setRestoreMsg(`Restore failed: ${msg.errorMessage ?? "unknown error"}`);
-          }
-          qc.invalidateQueries({ queryKey: ["snapshot-logs", msg.snapshotId] });
-        } else if (msg.type === "restore_progress") {
-          setRestorePercent(msg.percent ?? null);
-          if (msg.filesDone != null) setRestoreFilesDone(msg.filesDone);
-          if (msg.filesTotal != null) setRestoreFilesTotal(msg.filesTotal);
-        } else if (msg.type === "progress") {
-          // backup progress
-          const sid = msg.snapshotId as string;
-          if (sid) {
-            setBackupProgress((prev) => ({
-              ...prev,
-              [sid]: {
-                percent: msg.percent ?? 0,
-                filesDone: msg.filesDone ?? 0,
-                filesTotal: msg.filesTotal ?? 0,
-                bytesDone: msg.bytesDone ?? 0,
-                bytesTotal: msg.bytesTotal ?? 0,
-              },
-            }));
-          }
-        } else if (msg.type === "snapshot_done" || msg.type === "check_result") {
-          // refresh snapshots when backup/check finishes
-          qc.invalidateQueries({ queryKey: ["snapshots"] });
-          if (msg.snapshotId) {
-            setBackupProgress((prev) => {
-              const next = { ...prev };
-              delete next[msg.snapshotId as string];
-              return next;
-            });
-          }
-        }
-      } catch { /**/ }
-    };
-    return () => ws.close();
-  }, [qc]);
+  // WebSocket events via global connection
+  useWsEvent(["restore_result", "restore_progress", "progress", "snapshot_done", "check_result"], (msg) => {
+    if (msg.type === "restore_result") {
+      setRestoreRunning(false);
+      setRestorePercent(null);
+      if (msg.status === "success") {
+        setRestoreMsg(`Restore completed successfully. Files are at: ${msg.restorePath}`);
+      } else {
+        setRestoreMsg(`Restore failed: ${msg.errorMessage ?? "unknown error"}`);
+      }
+      qc.invalidateQueries({ queryKey: ["snapshot-logs", msg.snapshotId as string] });
+    } else if (msg.type === "restore_progress") {
+      setRestorePercent((msg.percent as number) ?? null);
+      if (msg.filesDone != null) setRestoreFilesDone(msg.filesDone as number);
+      if (msg.filesTotal != null) setRestoreFilesTotal(msg.filesTotal as number);
+    } else if (msg.type === "progress") {
+      const sid = msg.snapshotId as string;
+      if (sid) {
+        setBackupProgress((prev) => ({
+          ...prev,
+          [sid]: {
+            percent: (msg.percent as number) ?? 0,
+            filesDone: (msg.filesDone as number) ?? 0,
+            filesTotal: (msg.filesTotal as number) ?? 0,
+            bytesDone: (msg.bytesDone as number) ?? 0,
+            bytesTotal: (msg.bytesTotal as number) ?? 0,
+          },
+        }));
+      }
+    } else if (msg.type === "snapshot_done" || msg.type === "check_result") {
+      qc.invalidateQueries({ queryKey: ["snapshots"] });
+      if (msg.snapshotId) {
+        setBackupProgress((prev) => {
+          const next = { ...prev };
+          delete next[msg.snapshotId as string];
+          return next;
+        });
+      }
+    }
+  });
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
   const restoreMut = useMutation({
