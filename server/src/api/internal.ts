@@ -13,6 +13,7 @@ import { agents, backupJobs, destinations } from "../db/schema/index.js";
 import { eq, inArray } from "drizzle-orm";
 import { decrypt, sha256 } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
+import { config } from "../config.js";
 
 /** Compute SHA-256 hex digest of a file, or null if the file doesn't exist. */
 async function sha256File(filePath: string): Promise<string | null> {
@@ -184,7 +185,7 @@ internalRouter.get("/agents/:agentId/update/hash", requireAgentAuth, async (req,
   const arch = (req.query.arch as string) || "amd64";
   const ext = os === "windows" ? ".exe" : "";
   const filename = `agent-${os}-${arch}${ext}`;
-  const localPath = path.join(process.cwd(), "binaries", filename);
+  const localPath = path.join(config.dataDir, "binaries", filename);
   const hash = await sha256File(localPath);
   if (!hash) {
     res.status(404).json({ error: "Binary not available on server" });
@@ -200,7 +201,7 @@ internalRouter.get("/agents/:agentId/update/binary", requireAgentAuth, (req, res
   const arch = (req.query.arch as string) || "amd64";
   const ext = os === "windows" ? ".exe" : "";
   const filename = `agent-${os}-${arch}${ext}`;
-  const localPath = path.join(process.cwd(), "binaries", filename);
+  const localPath = path.join(config.dataDir, "binaries", filename);
   if (!existsSync(localPath)) {
     res.status(404).json({ error: "Binary not available on server" });
     return;

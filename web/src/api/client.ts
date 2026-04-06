@@ -65,6 +65,15 @@ export const api = {
     }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: "DELETE" }),
   updateAgent: (id: string) => request<{ message: string }>(`/agents/${id}/update`, { method: "POST" }),
+  uploadAgentBinary: (os: string, arch: string, file: File) => {
+    const body = new FormData();
+    body.append("binary", file);
+    return request<{ message: string; filename: string; size: number }>(`/agents/binary/${os}/${arch}`, {
+      method: "POST",
+      body,
+      headers: {}, // let browser set Content-Type with boundary
+    });
+  },
   getDiscoveredServices: (id: string) => request<DiscoveredService[]>(`/agents/${id}/discovered`),
 
   // Jobs
