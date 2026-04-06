@@ -177,22 +177,26 @@ export default function Destinations() {
       ) : (
         <div className="card">
           <table>
-            <thead><tr><th>Name</th><th>Type</th><th>Created</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Type</th><th>Repository path</th><th>Created</th><th></th></tr></thead>
             <tbody>
               {destinations.map((d) => (
                 <>
                   <tr key={d.id}>
                     <td style={{ fontWeight: 500 }}>{d.name}</td>
                     <td><span className="badge badge-primary">{DESTINATION_TYPES.find((t) => t.value === d.type)?.label ?? d.type}</span></td>
+                    <td style={{ fontFamily: "monospace", fontSize: 12, color: "var(--text-muted)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={d.repoSummary}>
+                      {d.repoSummary || "—"}
+                    </td>
                     <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{new Date(d.createdAt).toLocaleDateString()}</td>
                     <td style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                       <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Edit" onClick={() => openEdit(d.id)}>
                         <Pencil size={13} />
                       </button>
                       <button className="btn-ghost" style={{ padding: "4px 8px" }}
-                        title="Reset repository (fixes 'wrong password' error — starts a fresh repo on next backup)"
+                        title="Reset repository — fixes 'wrong password' error by starting a fresh restic repo on the next backup"
                         onClick={() => {
-                          if (confirm(`Reset the restic repository for "${d.name}"?\n\nThis will start a fresh repository on next backup. Existing snapshots in the old repository will no longer be accessible for restore.`)) {
+                          if (confirm(`Reset the restic repository for "${d.name}"?\n\nA fresh repository will be initialised on the next backup. All existing snapshots for this destination will be marked as orphaned (no longer restorable).`)) {
                             setResetMsg((prev) => ({ ...prev, [d.id]: "" }));
                             resetMut.mutate(d.id);
                           }
@@ -207,7 +211,7 @@ export default function Destinations() {
                   </tr>
                   {resetMsg[d.id] && (
                     <tr key={`${d.id}-msg`}>
-                      <td colSpan={4} style={{ padding: "4px 12px 8px", fontSize: 12, color: resetMsg[d.id].startsWith("Error") ? "var(--danger)" : "var(--success, #22c55e)" }}>
+                      <td colSpan={5} style={{ padding: "4px 12px 8px", fontSize: 12, color: resetMsg[d.id].startsWith("Error") ? "var(--danger)" : "var(--success, #22c55e)" }}>
                         {resetMsg[d.id]}
                       </td>
                     </tr>

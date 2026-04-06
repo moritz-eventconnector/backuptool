@@ -100,7 +100,7 @@ export default function Snapshots() {
       <div className="page-header">
         <h1>Snapshots</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          {["all", "success", "warning", "failed", "running"].map((s) => (
+          {["all", "success", "warning", "failed", "running", "orphaned"].map((s) => (
             <button key={s} className={statusFilter === s ? "btn-primary" : "btn-ghost"} style={{ padding: "6px 14px", textTransform: "capitalize" }}
               onClick={() => setStatusFilter(s)}>{s}</button>
           ))}
@@ -278,7 +278,7 @@ export default function Snapshots() {
                       <td>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                           {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          {(s.status === "success" || s.status === "warning") && (
+                          {(s.status === "success" || s.status === "warning") && s.status !== "orphaned" && (
                             <button className="btn-ghost" style={{ padding: "3px 6px" }} title="Restore"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -411,6 +411,7 @@ function StatusBadge({ status }: { status: string }) {
     running: "badge-primary",
     cancelled: "badge-muted",
     warning: "badge-warning",
+    orphaned: "badge-muted",
   };
   return <span className={`badge ${map[status] ?? "badge-muted"}`}>{status}</span>;
 }

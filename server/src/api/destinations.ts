@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
-import { destinations } from "../db/schema/index.js";
+import { destinations, snapshots } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
@@ -18,15 +18,36 @@ const createSchema = z.object({
 // GET /api/destinations
 destinationsRouter.get("/", requireAuth, (_req, res) => {
   const db = getDb();
-  const all = db.select({
-    id: destinations.id,
-    name: destinations.name,
-    type: destinations.type,
-    createdAt: destinations.createdAt,
-    updatedAt: destinations.updatedAt,
-  }).from(destinations).all();
-  // Never expose configEncrypted to the UI
-  res.json(all);
+  const all = db.select().from(destinations).all();
+  // Return safe fields + a non-sensitive repoSummary derived from config
+  const result = all.map((d) => {
+    let repoSummary = "";
+    try {
+      const cfg = JSON.parse(decrypt(d.configEncrypted)) as Record<string, unknown>;
+      const path = ((cfg.path as string) ?? "").replace(/\/$/, "");
+      switch (d.type) {
+        case "s3": case "b2": case "wasabi": case "minio": {
+          const bucket = (cfg.bucket as string) ?? "";
+          repoSummary = path ? `${bucket}/${path}` : bucket;
+          break;
+        }
+        case "local":
+          repoSummary = (cfg.path as string) ?? "";
+          break;
+        case "sftp":
+          repoSummary = `${cfg.host ?? ""}:${cfg.path ?? ""}`;
+          break;
+        case "rclone":
+          repoSummary = (cfg.remote as string) ?? "";
+          break;
+        case "gcs":
+          repoSummary = path ? `${cfg.bucket}/${path}` : (cfg.bucket as string) ?? "";
+          break;
+      }
+    } catch { /**/ }
+    return { id: d.id, name: d.name, type: d.type, repoSummary, createdAt: d.createdAt, updatedAt: d.updatedAt };
+  });
+  res.json(result);
 });
 
 // GET /api/destinations/:id — returns decrypted config (admin only)
@@ -110,6 +131,13 @@ destinationsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin"), (r
   db.update(destinations)
     .set({ configEncrypted: encrypt(JSON.stringify(config)), updatedAt: new Date().toISOString() } as Parameters<ReturnType<typeof db.update>["set"]>[0])
     .where(eq(destinations.id, req.params.id))
+    .run();
+
+  // Mark all snapshots stored at this destination as orphaned — they can no longer be restored
+  // because they were encrypted with the old repository key.
+  db.update(snapshots)
+    .set({ status: "orphaned" } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(snapshots.destinationId, req.params.id))
     .run();
 
   res.json({ message: "Repository reset. Next backup will initialise a fresh repository at the new path.", newPath: config.path });

@@ -197,7 +197,7 @@ export interface Snapshot {
   sizeBytes?: number;
   fileCount?: number;
   durationSeconds?: number;
-  status: "running" | "success" | "failed" | "cancelled" | "warning";
+  status: "running" | "success" | "failed" | "cancelled" | "warning" | "orphaned";
   errorMessage?: string;
   integrityCheckStatus?: "passed" | "failed" | null;
   startedAt: string;
@@ -226,7 +226,9 @@ export interface Destination {
   id: string;
   name: string;
   type: string;
+  repoSummary?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface NotificationSettings {
