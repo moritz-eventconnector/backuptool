@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Snapshot, type SnapshotLog, type RestoreAgent } from "../api/client.ts";
-import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock, Square, CheckSquare } from "lucide-react";
 import { config } from "../config.ts";
 
 // Live backup progress received via WebSocket: keyed by snapshotId
@@ -28,6 +28,11 @@ export default function Snapshots() {
   const [customInclude, setCustomInclude] = useState("");
   const [backupProgress, setBackupProgress] = useState<Record<string, BackupProgress>>({});
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLockDays, setBulkLockDays] = useState("30");
+  const [bulkMsg, setBulkMsg] = useState("");
 
   // WebSocket — listen for progress and results while on this page
   useEffect(() => {
@@ -93,7 +98,44 @@ export default function Snapshots() {
     onError: (e: Error) => { setRestoreMsg(`Error: ${e.message}`); },
   });
 
+  const bulkDeleteMut = useMutation({
+    mutationFn: (ids: string[]) => api.bulkDeleteSnapshots(ids),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["snapshots"] });
+      setSelectedIds(new Set());
+      const msg = `Deleted ${data.deleted} snapshot${data.deleted !== 1 ? "s" : ""}`;
+      setBulkMsg(data.skipped > 0 ? `${msg}. ${data.skipped} skipped (locked).` : msg + ".");
+    },
+    onError: (e: Error) => setBulkMsg(`Error: ${e.message}`),
+  });
+
+  const bulkLockMut = useMutation({
+    mutationFn: ({ ids, days }: { ids: string[]; days: number }) => api.bulkLockSnapshots(ids, days),
+    onSuccess: (data, vars) => {
+      qc.invalidateQueries({ queryKey: ["snapshots"] });
+      setSelectedIds(new Set());
+      setBulkMsg(`Locked ${data.locked} snapshot${data.locked !== 1 ? "s" : ""} until ${new Date(data.lockedUntil).toLocaleDateString()} (${vars.days} days).`);
+    },
+    onError: (e: Error) => setBulkMsg(`Error: ${e.message}`),
+  });
+
   const filtered = statusFilter === "all" ? snapshots : snapshots.filter((s) => s.status === statusFilter);
+
+  const allFilteredIds = filtered.map((s) => s.id);
+  const allSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedIds.has(id));
+  const someSelected = selectedIds.size > 0;
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelectedIds((prev) => { const next = new Set(prev); allFilteredIds.forEach((id) => next.delete(id)); return next; });
+    } else {
+      setSelectedIds((prev) => new Set([...prev, ...allFilteredIds]));
+    }
+  }
+
+  function toggleOne(id: string) {
+    setSelectedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  }
 
   return (
     <div>
@@ -102,10 +144,53 @@ export default function Snapshots() {
         <div style={{ display: "flex", gap: 8 }}>
           {["all", "success", "warning", "failed", "running", "orphaned"].map((s) => (
             <button key={s} className={statusFilter === s ? "btn-primary" : "btn-ghost"} style={{ padding: "6px 14px", textTransform: "capitalize" }}
-              onClick={() => setStatusFilter(s)}>{s}</button>
+              onClick={() => { setStatusFilter(s); setSelectedIds(new Set()); setBulkMsg(""); }}>{s}</button>
           ))}
         </div>
       </div>
+
+      {/* Bulk action toolbar — shown when at least one snapshot is selected */}
+      {someSelected && (
+        <div className="card" style={{ marginBottom: 12, padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "var(--bg-secondary)", borderLeft: "3px solid var(--primary)" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{selectedIds.size} selected</span>
+          <button className="btn-ghost" style={{ fontSize: 12, padding: "4px 10px", color: "var(--text-muted)" }}
+            onClick={() => setSelectedIds(new Set())}>Deselect all</button>
+          <div style={{ flex: 1 }} />
+          {bulkMsg && <span style={{ fontSize: 12, color: bulkMsg.startsWith("Error") ? "var(--danger)" : "var(--success, #22c55e)" }}>{bulkMsg}</span>}
+          {/* Lock section */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Lock size={13} color="var(--warning, #f59e0b)" />
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Lock for</span>
+            <input
+              type="number" min={1} max={36500} value={bulkLockDays}
+              onChange={(e) => setBulkLockDays(e.target.value)}
+              style={{ width: 60, padding: "3px 6px", fontSize: 12 }}
+            />
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>days</span>
+            <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12, color: "var(--warning, #f59e0b)", border: "1px solid var(--warning, #f59e0b)" }}
+              disabled={bulkLockMut.isPending}
+              onClick={() => {
+                const days = parseInt(bulkLockDays, 10);
+                if (!days || days < 1) { setBulkMsg("Enter a valid number of days."); return; }
+                if (!confirm(`Lock ${selectedIds.size} snapshot(s) for ${days} days? They cannot be deleted until the lock expires.`)) return;
+                setBulkMsg("");
+                bulkLockMut.mutate({ ids: [...selectedIds], days });
+              }}>
+              {bulkLockMut.isPending ? "Locking…" : "Lock"}
+            </button>
+          </div>
+          {/* Delete section */}
+          <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12, color: "var(--danger)", border: "1px solid var(--danger)" }}
+            disabled={bulkDeleteMut.isPending}
+            onClick={() => {
+              if (!confirm(`Delete ${selectedIds.size} snapshot(s)? Locked snapshots will be skipped.`)) return;
+              setBulkMsg("");
+              bulkDeleteMut.mutate([...selectedIds]);
+            }}>
+            {bulkDeleteMut.isPending ? <><span className="spinner" style={{ width: 11, height: 11, marginRight: 5 }} />Deleting…</> : <><Trash2 size={12} style={{ marginRight: 5 }} />Delete</>}
+          </button>
+        </div>
+      )}
 
       {/* Restore Dialog */}
       {restoreDialog && (() => {
@@ -242,31 +327,53 @@ export default function Snapshots() {
         <div className="card">
           <table>
             <thead>
-              <tr><th>Started</th><th>Job</th><th>Agent</th><th>Status</th><th>Size</th><th>Duration</th><th>Retries</th><th></th></tr>
+              <tr>
+                <th style={{ width: 36, padding: "8px 4px 8px 12px" }}>
+                  <button className="btn-ghost" style={{ padding: 2 }} title={allSelected ? "Deselect all" : "Select all"} onClick={toggleAll}>
+                    {allSelected ? <CheckSquare size={14} color="var(--primary)" /> : <Square size={14} color="var(--text-muted)" />}
+                  </button>
+                </th>
+                <th>Started</th><th>Job</th><th>Agent</th><th>Status</th><th>Size</th><th>Duration</th><th>Retries</th><th></th>
+              </tr>
             </thead>
             <tbody>
               {filtered.map((s) => {
                 const job = jobs.find((j) => j.id === s.jobId);
                 const agent = agents.find((a) => a.id === s.agentId);
                 const prog = backupProgress[s.id];
+                const isSelected = selectedIds.has(s.id);
 
-                // WORM lock state
+                // Lock state: job-level WORM or per-snapshot lock
                 const wormLocked = (() => {
-                  if (!job?.wormEnabled || !job.wormRetentionDays) return null;
-                  const unlockMs = new Date(s.startedAt).getTime() + job.wormRetentionDays * 86_400_000;
-                  if (Date.now() < unlockMs) return new Date(unlockMs);
+                  if (job?.wormEnabled && job.wormRetentionDays) {
+                    const unlockMs = new Date(s.startedAt).getTime() + job.wormRetentionDays * 86_400_000;
+                    if (Date.now() < unlockMs) return new Date(unlockMs);
+                  }
                   return null;
                 })();
+                const snapLocked = s.lockedUntil && new Date(s.lockedUntil) > new Date() ? new Date(s.lockedUntil) : null;
+                const locked = wormLocked ?? snapLocked;
 
                 return (
                   <>
-                    <tr key={s.id} style={{ cursor: "pointer" }} onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
+                    <tr key={s.id} style={{ cursor: "pointer", background: isSelected ? "rgba(var(--primary-rgb, 99,102,241),.07)" : undefined }}
+                      onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
+                      <td style={{ padding: "8px 4px 8px 12px" }} onClick={(e) => { e.stopPropagation(); toggleOne(s.id); }}>
+                        <button className="btn-ghost" style={{ padding: 2 }}>
+                          {isSelected ? <CheckSquare size={14} color="var(--primary)" /> : <Square size={14} color="var(--text-muted)" />}
+                        </button>
+                      </td>
                       <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{fmt(s.startedAt)}</td>
                       <td style={{ fontWeight: 500 }}>
                         {job?.name ?? s.jobId.slice(0, 8)}
                         {job?.wormEnabled && (
-                          <span title={wormLocked ? `Locked until ${wormLocked.toLocaleDateString()}` : "WORM (unlocked)"} style={{ marginLeft: 6, display: "inline-flex", verticalAlign: "middle" }}>
+                          <span title={wormLocked ? `WORM locked until ${wormLocked.toLocaleDateString()}` : "WORM (unlocked)"} style={{ marginLeft: 6, display: "inline-flex", verticalAlign: "middle" }}>
                             <Lock size={11} color={wormLocked ? "var(--warning, #f59e0b)" : "var(--text-muted)"} />
+                          </span>
+                        )}
+                        {snapLocked && !wormLocked && (
+                          <span title={`Individually locked until ${snapLocked.toLocaleDateString()}`} style={{ marginLeft: 6, display: "inline-flex", verticalAlign: "middle" }}>
+                            <Lock size={11} color="var(--primary)" />
                           </span>
                         )}
                       </td>
@@ -291,8 +398,8 @@ export default function Snapshots() {
                               <RotateCcw size={12} color="var(--primary)" />
                             </button>
                           )}
-                          {wormLocked ? (
-                            <span title={`WORM locked until ${wormLocked.toLocaleDateString()} — deletion not permitted`}
+                          {locked ? (
+                            <span title={`Locked until ${locked.toLocaleDateString()} — deletion not permitted`}
                               style={{ padding: "3px 6px", display: "inline-flex", alignItems: "center", opacity: 0.5, cursor: "not-allowed" }}>
                               <Lock size={12} color="var(--warning, #f59e0b)" />
                             </span>
@@ -308,7 +415,7 @@ export default function Snapshots() {
                     {/* Live backup progress bar */}
                     {s.status === "running" && prog && (
                       <tr key={`${s.id}-progress`}>
-                        <td colSpan={8} style={{ padding: "0 16px 8px" }}>
+                        <td colSpan={9} style={{ padding: "0 16px 8px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-muted)", marginBottom: 3 }}>
                             <span>Backing up…</span>
                             <span>
@@ -325,7 +432,7 @@ export default function Snapshots() {
                     )}
                     {expanded === s.id && (
                       <tr key={`${s.id}-detail`}>
-                        <td colSpan={8} style={{ padding: 0 }}>
+                        <td colSpan={9} style={{ padding: 0 }}>
                           <SnapshotDetail snapshot={s} />
                         </td>
                       </tr>
@@ -387,6 +494,12 @@ function SnapshotDetail({ snapshot }: { snapshot: Snapshot }) {
           </div>
         </div>
       </div>
+      {snapshot.lockedUntil && new Date(snapshot.lockedUntil) > new Date() && (
+        <div style={{ fontSize: 12, color: "var(--primary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+          <Lock size={12} />
+          Individually locked until {new Date(snapshot.lockedUntil).toLocaleDateString()}
+        </div>
+      )}
       {snapshot.errorMessage && (
         <div style={{ fontSize: 12, color: "var(--danger)", marginBottom: 8 }}>{snapshot.errorMessage}</div>
       )}
