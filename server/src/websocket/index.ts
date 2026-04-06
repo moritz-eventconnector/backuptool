@@ -103,9 +103,10 @@ export function initWebSocket(server: Server): WebSocketServer {
           agentConnections.set(agentId, ws);
           socketToAgent.set(ws, agentId);
 
-          // Mark agent online
+          // Mark agent online and persist the reported version
+          const connectVersion = msg.version as string | undefined;
           db.update(agents)
-            .set({ status: "online", lastSeen: new Date().toISOString() })
+            .set({ status: "online", lastSeen: new Date().toISOString(), ...(connectVersion ? { version: connectVersion } : {}) })
             .where(eq(agents.id, agentId))
             .run();
 
