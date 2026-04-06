@@ -338,6 +338,29 @@ jobsRouter.post("/:id/rotate-key", requireAuth, requireRole("admin"), (req, res)
   res.json({ message: "Key rotation started — agent will update the repository" });
 });
 
+// POST /api/jobs/:id/reset-repo — assign a new resticRepoSuffix to isolate this job's repo path.
+// Orphans all existing snapshots for this job (they used the old path/password).
+jobsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin", "operator"), (req, res) => {
+  const db = getDb();
+  const [job] = db.select().from(backupJobs).where(eq(backupJobs.id, req.params.id)).all();
+  if (!job) { res.status(404).json({ error: "Job not found" }); return; }
+
+  const newSuffix = nanoid(8);
+  db.update(backupJobs)
+    .set({ resticRepoSuffix: newSuffix } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(backupJobs.id, job.id))
+    .run();
+
+  // Orphan existing snapshots — they were created at the old repo path
+  db.update(snapshots)
+    .set({ status: "orphaned" } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(snapshots.jobId, job.id))
+    .run();
+
+  writeAuditLog(req, "job.reset_repo", `job:${job.id}`, { jobName: job.name, newSuffix });
+  res.json({ message: "Repo path reset. A new isolated repository will be initialised on the next backup.", newSuffix });
+});
+
 // GET /api/jobs/:id/snapshots
 jobsRouter.get("/:id/snapshots", requireAuth, (req, res) => {
   const db = getDb();
