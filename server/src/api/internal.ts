@@ -84,7 +84,19 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
 
   const result = jobs.map((job) => {
     const destIds: string[] = JSON.parse(job.destinationIds ?? "[]");
-    const jobDestinations = destIds.map((id) => destMap.get(id)).filter(Boolean);
+    // Inject the per-job repo suffix into each destination's config so the agent
+    // can construct the correct job-isolated repository URL.
+    const jobDestinations = destIds.map((id) => {
+      const d = destMap.get(id);
+      if (!d) return null;
+      return {
+        ...d,
+        config: {
+          ...d.config,
+          ...(job.resticRepoSuffix ? { _repoSuffix: job.resticRepoSuffix } : {}),
+        },
+      };
+    }).filter(Boolean);
 
     let resticPassword = "";
     if (job.resticPasswordEncrypted) {
@@ -137,6 +149,7 @@ internalRouter.get("/agents/:agentId/jobs/:jobId", requireAgentAuth, (req, res) 
   const jobDestinations = destRows.map((d) => {
     let config: Record<string, unknown> = {};
     try { config = JSON.parse(decrypt(d.configEncrypted)); } catch { /* ignore */ }
+    if (job.resticRepoSuffix) config._repoSuffix = job.resticRepoSuffix;
     return { id: d.id, name: d.name, type: d.type, config };
   });
 

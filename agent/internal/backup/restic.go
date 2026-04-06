@@ -230,6 +230,10 @@ func (r *Runner) Restore(ctx context.Context, dest *Destination, resticSnapshotI
 	for _, p := range includePaths {
 		if p = strings.TrimSpace(p); p != "" {
 			args = append(args, "--include="+p)
+			// Also include all contents of this directory path.
+			// restic --include matches on the full file path; the pattern "/foo"
+			// alone matches only the directory entry itself, not its children.
+			args = append(args, "--include="+strings.TrimRight(p, "/")+"/**")
 		}
 	}
 
@@ -523,10 +527,23 @@ func (r *Runner) applyRetention(ctx context.Context, policy RetentionPolicy, rep
 }
 
 // buildRepoURLAndEnv constructs the RESTIC_REPOSITORY URL and required env vars for a destination.
+// If dest.Config["_repoSuffix"] is set, it is appended to the repo URL so that each backup job
+// has its own isolated repository within a shared storage bucket/path.
 func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error) {
 	get := func(key string) string {
 		v, _ := dest.Config[key].(string)
 		return strings.TrimSpace(v)
+	}
+
+	// Per-job isolation suffix (injected by server, never user-supplied)
+	repoSuffix := strings.TrimSpace(get("_repoSuffix"))
+
+	// appendSuffix appends the suffix to a URL path component if one was set.
+	appendSuffix := func(u string) string {
+		if repoSuffix == "" {
+			return u
+		}
+		return strings.TrimRight(u, "/") + "/" + repoSuffix
 	}
 
 	switch dest.Type {
@@ -554,7 +571,7 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 		if region != "" {
 			env = append(env, "AWS_DEFAULT_REGION="+region)
 		}
-		return repoURL, env, nil
+		return appendSuffix(repoURL), env, nil
 
 	case "b2":
 		// Use S3-compatible API (recommended). Fields: endpoint, bucket, accessKeyId, secretAccessKey, path.
@@ -584,7 +601,7 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 				"AWS_ACCESS_KEY_ID=" + accessKey,
 				"AWS_SECRET_ACCESS_KEY=" + secretKey,
 			}
-			return repoURL, env, nil
+			return appendSuffix(repoURL), env, nil
 		}
 
 		// Native B2 fallback (legacy — no endpoint configured)
@@ -604,10 +621,10 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 			"B2_ACCOUNT_ID=" + accountID,
 			"B2_ACCOUNT_KEY=" + appKey,
 		}
-		return repoURL, env, nil
+		return appendSuffix(repoURL), env, nil
 
 	case "local":
-		return get("path"), nil, nil
+		return appendSuffix(get("path")), nil, nil
 
 	case "sftp":
 		port := get("port")
@@ -618,10 +635,10 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 		user := get("user")
 		path := get("path")
 		repoURL := fmt.Sprintf("sftp:%s@%s:%s%s", user, host, port, path)
-		return repoURL, nil, nil
+		return appendSuffix(repoURL), nil, nil
 
 	case "rclone":
-		return "rclone:" + get("remote"), nil, nil
+		return appendSuffix("rclone:" + get("remote")), nil, nil
 
 	case "gcs":
 		bucket := get("bucket")
@@ -636,7 +653,7 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 
 		repoURL := "gs:" + bucket + ":/" + path
 		env := []string{"GOOGLE_APPLICATION_CREDENTIALS=" + credFile}
-		return repoURL, env, nil
+		return appendSuffix(repoURL), env, nil
 
 	default:
 		return "", nil, fmt.Errorf("unsupported destination type: %s", dest.Type)

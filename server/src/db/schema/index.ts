@@ -65,6 +65,11 @@ export const backupJobs = sqliteTable("backup_jobs", {
   maxRetries: integer("max_retries").notNull().default(3),
   retryDelaySeconds: integer("retry_delay_seconds").notNull().default(60),
   tags: text("tags").default("[]"),
+  // Each job gets its own sub-path within a shared destination so multiple jobs
+  // can safely use the same bucket without password conflicts.
+  // New jobs: short random suffix appended to the repo URL.
+  // Legacy jobs (created before this feature): suffix is null → old path used as-is.
+  resticRepoSuffix: text("restic_repo_suffix"),
   // Deep verification (restic check --read-data-subset)
   lastVerifiedAt: text("last_verified_at"),
   lastVerifyStatus: text("last_verify_status"), // "passed" | "failed" | null
@@ -91,6 +96,7 @@ export const snapshots = sqliteTable("snapshots", {
   finishedAt: text("finished_at"),
   retryCount: integer("retry_count").notNull().default(0),
   integrityCheckStatus: text("integrity_check_status"), // "passed" | "failed" | null = not yet checked
+  lockedUntil: text("locked_until"), // ISO timestamp; null = not individually locked
 });
 
 // ── Snapshot Logs ─────────────────────────────────────────────────────────────

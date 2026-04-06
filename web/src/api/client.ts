@@ -83,6 +83,8 @@ export const api = {
   getSnapshot: (id: string) => request<Snapshot>(`/snapshots/${id}`),
   getSnapshotLogs: (id: string) => request<SnapshotLog[]>(`/snapshots/${id}/logs`),
   deleteSnapshot: (id: string) => request(`/snapshots/${id}`, { method: "DELETE" }),
+  bulkDeleteSnapshots: (ids: string[]) => request<{ deleted: number; skipped: number; skippedIds: string[] }>(`/snapshots/bulk-delete`, { method: "POST", body: JSON.stringify({ ids }) }),
+  bulkLockSnapshots: (ids: string[], days: number) => request<{ locked: number; lockedUntil: string }>(`/snapshots/bulk-lock`, { method: "POST", body: JSON.stringify({ ids, days }) }),
 
   // Destinations
   listDestinations: () => request<Destination[]>("/destinations"),
@@ -231,6 +233,7 @@ export interface Snapshot {
   startedAt: string;
   finishedAt?: string;
   retryCount: number;
+  lockedUntil?: string | null;
 }
 
 export interface RestoreAgent {

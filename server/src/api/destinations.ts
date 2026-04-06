@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
-import { destinations, snapshots } from "../db/schema/index.js";
+import { destinations, snapshots, backupJobs } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
@@ -136,12 +136,23 @@ destinationsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin"), (r
     .where(eq(destinations.id, req.params.id))
     .run();
 
-  // Mark all snapshots stored at this destination as orphaned — they can no longer be restored
-  // because they were encrypted with the old repository key.
-  db.update(snapshots)
-    .set({ status: "orphaned" } as Parameters<ReturnType<typeof db.update>["set"]>[0])
-    .where(eq(snapshots.destinationId, req.params.id))
-    .run();
+  // Mark all snapshots for every job that uses this destination as orphaned.
+  // We can't filter by snapshots.destinationId directly because that field is often null;
+  // instead we find affected jobs through their destinationIds JSON array.
+  const allJobs = db.select({ id: backupJobs.id, destinationIds: backupJobs.destinationIds }).from(backupJobs).all();
+  const affectedJobIds = allJobs
+    .filter((j) => {
+      const dids: string[] = JSON.parse(j.destinationIds ?? "[]");
+      return dids.includes(req.params.id);
+    })
+    .map((j) => j.id);
+
+  for (const jobId of affectedJobIds) {
+    db.update(snapshots)
+      .set({ status: "orphaned" } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+      .where(eq(snapshots.jobId, jobId))
+      .run();
+  }
 
   writeAuditLog(req, "reset_destination_repo", `destination:${req.params.id}`, { newPath: config.path });
   res.json({ message: "Repository reset. Next backup will initialise a fresh repository at the new path.", newPath: config.path });
