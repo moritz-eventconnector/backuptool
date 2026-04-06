@@ -67,11 +67,8 @@ export function GlobalWsNotifications() {
       if (type === "agent_status") {
         const status = msg.status as string;
         const name = (msg.agentName as string) ?? "Agent";
-        const version = msg.version as string | undefined;
-        if (status === "online" && version) {
-          // Only show when reconnecting (agent self-update causes a reconnect)
-          notify({ kind: "success", title: `${name} online`, message: version ? `v${version}` : undefined, duration: 4000 });
-        } else if (status === "offline") {
+        // Only show offline — online is handled inline on Agents page or via update_ack flow
+        if (status === "offline") {
           notify({ kind: "warning", title: `${name} disconnected`, duration: 4000 });
         }
         return;
