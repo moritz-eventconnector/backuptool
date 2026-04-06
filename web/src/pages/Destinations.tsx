@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, HardDrive, Pencil } from "lucide-react";
+import { Plus, Trash2, HardDrive, Pencil, RefreshCw } from "lucide-react";
 
 const DESTINATION_TYPES = [
   { value: "s3",     label: "Amazon S3 / S3-Compatible" },
@@ -93,6 +93,18 @@ export default function Destinations() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["destinations"] }),
   });
 
+  const [resetMsg, setResetMsg] = useState<Record<string, string>>({});
+  const resetMut = useMutation({
+    mutationFn: (id: string) => api.resetDestinationRepo(id),
+    onSuccess: (data, id) => {
+      setResetMsg((prev) => ({ ...prev, [id]: `Repo reset — new path: ${data.newPath}` }));
+      qc.invalidateQueries({ queryKey: ["destinations"] });
+    },
+    onError: (e: Error, id) => {
+      setResetMsg((prev) => ({ ...prev, [id]: `Error: ${e.message}` }));
+    },
+  });
+
   const openAdd = () => {
     setForm(EMPTY_FORM);
     setError("");
@@ -168,20 +180,39 @@ export default function Destinations() {
             <thead><tr><th>Name</th><th>Type</th><th>Created</th><th></th></tr></thead>
             <tbody>
               {destinations.map((d) => (
-                <tr key={d.id}>
-                  <td style={{ fontWeight: 500 }}>{d.name}</td>
-                  <td><span className="badge badge-primary">{DESTINATION_TYPES.find((t) => t.value === d.type)?.label ?? d.type}</span></td>
-                  <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{new Date(d.createdAt).toLocaleDateString()}</td>
-                  <td style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                    <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Edit" onClick={() => openEdit(d.id)}>
-                      <Pencil size={13} />
-                    </button>
-                    <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Delete"
-                      onClick={() => { if (confirm(`Delete "${d.name}"?`)) deleteMut.mutate(d.id); }}>
-                      <Trash2 size={13} color="var(--danger)" />
-                    </button>
-                  </td>
-                </tr>
+                <>
+                  <tr key={d.id}>
+                    <td style={{ fontWeight: 500 }}>{d.name}</td>
+                    <td><span className="badge badge-primary">{DESTINATION_TYPES.find((t) => t.value === d.type)?.label ?? d.type}</span></td>
+                    <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{new Date(d.createdAt).toLocaleDateString()}</td>
+                    <td style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                      <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Edit" onClick={() => openEdit(d.id)}>
+                        <Pencil size={13} />
+                      </button>
+                      <button className="btn-ghost" style={{ padding: "4px 8px" }}
+                        title="Reset repository (fixes 'wrong password' error — starts a fresh repo on next backup)"
+                        onClick={() => {
+                          if (confirm(`Reset the restic repository for "${d.name}"?\n\nThis will start a fresh repository on next backup. Existing snapshots in the old repository will no longer be accessible for restore.`)) {
+                            setResetMsg((prev) => ({ ...prev, [d.id]: "" }));
+                            resetMut.mutate(d.id);
+                          }
+                        }}>
+                        <RefreshCw size={13} color="var(--warning, #f59e0b)" />
+                      </button>
+                      <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Delete"
+                        onClick={() => { if (confirm(`Delete "${d.name}"?`)) deleteMut.mutate(d.id); }}>
+                        <Trash2 size={13} color="var(--danger)" />
+                      </button>
+                    </td>
+                  </tr>
+                  {resetMsg[d.id] && (
+                    <tr key={`${d.id}-msg`}>
+                      <td colSpan={4} style={{ padding: "4px 12px 8px", fontSize: 12, color: resetMsg[d.id].startsWith("Error") ? "var(--danger)" : "var(--success, #22c55e)" }}>
+                        {resetMsg[d.id]}
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

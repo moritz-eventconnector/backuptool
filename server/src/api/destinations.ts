@@ -91,6 +91,30 @@ destinationsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (r
   res.json({ message: "Destination updated" });
 });
 
+// POST /api/destinations/:id/reset-repo — appends a new path version so the next
+// backup initialises a fresh restic repository (fixes password-mismatch errors).
+destinationsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin"), (req, res) => {
+  const db = getDb();
+  const [dest] = db.select().from(destinations).where(eq(destinations.id, req.params.id)).all();
+  if (!dest) {
+    res.status(404).json({ error: "Destination not found" });
+    return;
+  }
+
+  const config = JSON.parse(decrypt(dest.configEncrypted)) as Record<string, unknown>;
+  // Strip any previous reset suffix, then append a new timestamp-based version.
+  const base = ((config.path as string) ?? "").replace(/\/$/, "").replace(/-r\d+$/, "");
+  const ts = Math.floor(Date.now() / 1000);
+  config.path = (base ? base + "-" : "") + `r${ts}`;
+
+  db.update(destinations)
+    .set({ configEncrypted: encrypt(JSON.stringify(config)), updatedAt: new Date().toISOString() } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(destinations.id, req.params.id))
+    .run();
+
+  res.json({ message: "Repository reset. Next backup will initialise a fresh repository at the new path.", newPath: config.path });
+});
+
 // DELETE /api/destinations/:id
 destinationsRouter.delete("/:id", requireAuth, requireRole("admin"), (req, res) => {
   const db = getDb();

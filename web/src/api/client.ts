@@ -92,6 +92,7 @@ export const api = {
   updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown> }) =>
     request(`/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteDestination: (id: string) => request(`/destinations/${id}`, { method: "DELETE" }),
+  resetDestinationRepo: (id: string) => request<{ message: string; newPath: string }>(`/destinations/${id}/reset-repo`, { method: "POST" }),
 
   // License
   getLicense: () => request<LicenseInfo>("/license"),
