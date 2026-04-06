@@ -316,6 +316,67 @@ func handleConnection(
 				}
 			}()
 
+		case "verify_backup":
+			var jobID string
+			var password string
+			var dests []backup.Destination
+			json.Unmarshal(msg["jobId"], &jobID)
+			json.Unmarshal(msg["password"], &password)
+			json.Unmarshal(msg["destinations"], &dests)
+			go func() {
+				log.Printf("Starting deep verify for job %s (%d destinations)", jobID, len(dests))
+				var firstErr error
+				for i := range dests {
+					if err := runner.DeepVerify(ctx, &dests[i], password); err != nil {
+						firstErr = err
+						log.Printf("Deep verify FAILED for dest %s: %v", dests[i].ID, err)
+					}
+				}
+				result := map[string]interface{}{
+					"type":  "verify_result",
+					"jobId": jobID,
+				}
+				if firstErr != nil {
+					result["status"] = "failed"
+					result["message"] = firstErr.Error()
+				} else {
+					result["status"] = "passed"
+					result["message"] = "All destinations verified (25% data sample)"
+				}
+				conn.WriteJSON(result)
+			}()
+
+		case "rotate_key":
+			var jobID, oldPassword, newPassword string
+			var dests []backup.Destination
+			json.Unmarshal(msg["jobId"], &jobID)
+			json.Unmarshal(msg["oldPassword"], &oldPassword)
+			json.Unmarshal(msg["newPassword"], &newPassword)
+			json.Unmarshal(msg["destinations"], &dests)
+			go func() {
+				log.Printf("Rotating encryption key for job %s (%d destinations)", jobID, len(dests))
+				var firstErr error
+				for i := range dests {
+					if err := runner.RotateKey(ctx, &dests[i], oldPassword, newPassword); err != nil {
+						firstErr = err
+						log.Printf("Key rotation FAILED for dest %s: %v", dests[i].ID, err)
+						break // abort on first failure — DB keeps old password
+					}
+				}
+				result := map[string]interface{}{
+					"type":  "rotate_key_result",
+					"jobId": jobID,
+				}
+				if firstErr != nil {
+					result["status"] = "failed"
+					result["message"] = firstErr.Error()
+				} else {
+					result["status"] = "success"
+					result["message"] = "Key rotation completed"
+				}
+				conn.WriteJSON(result)
+			}()
+
 		case "update_binary":
 			log.Println("Received update command from server — checking for newer binary…")
 			conn.WriteJSON(map[string]string{"type": "update_ack", "status": "checking"})

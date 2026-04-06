@@ -315,6 +315,82 @@ func (r *Runner) ListFiles(ctx context.Context, dest *Destination, resticSnapsho
 	return files, nil
 }
 
+// DeepVerify runs restic check --read-data-subset=25% to verify actual data pack
+// integrity (not just metadata). This is slower but catches real bit-rot or
+// storage corruption that a normal Check() would miss.
+func (r *Runner) DeepVerify(ctx context.Context, dest *Destination, password string) error {
+	repoURL, env, err := r.buildRepoURLAndEnv(dest)
+	if err != nil {
+		return err
+	}
+	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
+
+	// 25% random sample — good balance between thoroughness and speed.
+	// Running weekly rotates through the full dataset in ~4 weeks.
+	cmd := exec.CommandContext(ctx, r.ResticBin, "check", "--read-data-subset=25%")
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("restic check --read-data-subset: %v\n%s", err, string(out))
+	}
+	return nil
+}
+
+// RotateKey adds a new encryption key (newPassword) to the repository and removes
+// all old keys. Uses the current oldPassword to authenticate the key-add operation.
+func (r *Runner) RotateKey(ctx context.Context, dest *Destination, oldPassword, newPassword string) error {
+	repoURL, env, err := r.buildRepoURLAndEnv(dest)
+	if err != nil {
+		return err
+	}
+
+	envOld := append(append([]string{}, env...), "RESTIC_PASSWORD="+oldPassword, "RESTIC_REPOSITORY="+repoURL)
+	envNew := append(append([]string{}, env...), "RESTIC_PASSWORD="+newPassword, "RESTIC_REPOSITORY="+repoURL)
+
+	// Write new password to a temp file (restic key add requires --new-password-file)
+	tmp, err := os.CreateTemp("", "restic-newkey-*")
+	if err != nil {
+		return fmt.Errorf("create temp key file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(newPassword); err != nil {
+		return fmt.Errorf("write temp key file: %w", err)
+	}
+	tmp.Close()
+
+	// Step 1: add new key (authenticated with old password)
+	addCmd := exec.CommandContext(ctx, r.ResticBin, "key", "add", "--new-password-file", tmp.Name())
+	addCmd.Env = append(os.Environ(), envOld...)
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("restic key add: %v\n%s", err, string(out))
+	}
+
+	// Step 2: list keys authenticated with new password, remove non-current ones
+	listCmd := exec.CommandContext(ctx, r.ResticBin, "key", "list", "--json")
+	listCmd.Env = append(os.Environ(), envNew...)
+	listOut, err := listCmd.Output()
+	if err != nil {
+		// Key was added — not fatal if we can't remove old keys
+		return nil
+	}
+
+	var keys []struct {
+		ID      string `json:"id"`
+		Current bool   `json:"current"`
+	}
+	if err := json.Unmarshal(listOut, &keys); err != nil {
+		return nil // non-fatal
+	}
+	for _, k := range keys {
+		if !k.Current {
+			removeCmd := exec.CommandContext(ctx, r.ResticBin, "key", "remove", k.ID)
+			removeCmd.Env = append(os.Environ(), envNew...)
+			removeCmd.Run() // best-effort: old key becomes unreachable anyway
+		}
+	}
+	return nil
+}
+
 // Check runs restic check to verify repository data integrity.
 // It should be called after a successful backup to detect any corruption.
 func (r *Runner) Check(ctx context.Context, dest *Destination, password string) error {

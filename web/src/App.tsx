@@ -11,6 +11,7 @@ import Destinations from "./pages/Destinations.tsx";
 import LicensePage from "./pages/License.tsx";
 import Settings from "./pages/Settings.tsx";
 import Onboarding from "./pages/Onboarding.tsx";
+import AuditLog from "./pages/AuditLog.tsx";
 import { useEffect, useState } from "react";
 import { api } from "./api/client.ts";
 
@@ -75,6 +76,7 @@ function AppRoutes() {
         <Route path="destinations" element={<Destinations />} />
         <Route path="license" element={<LicensePage />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="audit-log" element={<AuditLog />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

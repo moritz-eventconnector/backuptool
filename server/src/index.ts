@@ -27,6 +27,7 @@ import { installRouter } from "./api/install.js";
 import { appConfigRouter } from "./api/app-config.js";
 import { ssoConfigRouter } from "./api/sso-config.js";
 import { proxyRouter } from "./api/proxy.js";
+import { auditRouter } from "./api/audit.js";
 import { startOverdueChecker } from "./alerts/overdue.js";
 
 async function main() {
@@ -107,6 +108,7 @@ async function main() {
   app.use("/api/settings", appConfigRouter);
   app.use("/api/settings", ssoConfigRouter);
   app.use("/api/settings", proxyRouter);
+  app.use("/api/audit-logs", auditRouter);
 
   // Health check — available at both /health and /api/health (Docker uses /api/health)
   app.get("/health", (_req, res) => { res.json({ status: "ok", version: "1.0.0" }); });

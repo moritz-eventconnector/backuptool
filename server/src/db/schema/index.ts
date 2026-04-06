@@ -65,6 +65,11 @@ export const backupJobs = sqliteTable("backup_jobs", {
   maxRetries: integer("max_retries").notNull().default(3),
   retryDelaySeconds: integer("retry_delay_seconds").notNull().default(60),
   tags: text("tags").default("[]"),
+  // Deep verification (restic check --read-data-subset)
+  lastVerifiedAt: text("last_verified_at"),
+  lastVerifyStatus: text("last_verify_status"), // "passed" | "failed" | null
+  // Key rotation: stores new encrypted password until agent confirms success
+  resticPasswordPending: text("restic_password_pending"),
   createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
@@ -138,9 +143,10 @@ export const notificationSettings = sqliteTable("notification_settings", {
 export const auditLog = sqliteTable("audit_log", {
   id: text("id").primaryKey(),
   userId: text("user_id"),
+  userEmail: text("user_email"),      // stored at time of action (survives user deletion)
   action: text("action").notNull(),   // "login" | "create_job" | "delete_agent" | ...
-  resource: text("resource"),         // e.g. "agent:abc123"
-  details: text("details"),           // JSON
+  resource: text("resource"),         // e.g. "job:abc123"
+  details: text("details"),           // JSON blob with extra context
   ip: text("ip"),
   userAgent: text("user_agent"),
   createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),

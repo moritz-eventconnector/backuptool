@@ -6,6 +6,7 @@ import { destinations, snapshots } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
+import { writeAuditLog } from "../middleware/audit.js";
 
 export const destinationsRouter = Router();
 
@@ -81,6 +82,7 @@ destinationsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req
     configEncrypted,
   }).run();
 
+  writeAuditLog(req, "create_destination", `destination:${id}`, { name: parse.data.name, type: parse.data.type });
   res.status(201).json({ id, name: parse.data.name, type: parse.data.type });
 });
 
@@ -109,6 +111,7 @@ destinationsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (r
     .where(eq(destinations.id, req.params.id))
     .run();
 
+  writeAuditLog(req, "update_destination", `destination:${req.params.id}`);
   res.json({ message: "Destination updated" });
 });
 
@@ -140,6 +143,7 @@ destinationsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin"), (r
     .where(eq(snapshots.destinationId, req.params.id))
     .run();
 
+  writeAuditLog(req, "reset_destination_repo", `destination:${req.params.id}`, { newPath: config.path });
   res.json({ message: "Repository reset. Next backup will initialise a fresh repository at the new path.", newPath: config.path });
 });
 
@@ -147,5 +151,6 @@ destinationsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin"), (r
 destinationsRouter.delete("/:id", requireAuth, requireRole("admin"), (req, res) => {
   const db = getDb();
   db.delete(destinations).where(eq(destinations.id, req.params.id)).run();
+  writeAuditLog(req, "delete_destination", `destination:${req.params.id}`);
   res.json({ message: "Destination deleted" });
 });

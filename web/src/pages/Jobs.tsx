@@ -1,8 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Job, type DiscoveredService } from "../api/client.ts";
-import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp, ShieldCheck, KeyRound } from "lucide-react";
 import { CronPicker } from "../components/CronPicker.tsx";
+import { config } from "../config.ts";
 
 export default function Jobs() {
   const qc = useQueryClient();
@@ -23,6 +24,44 @@ export default function Jobs() {
     },
   });
 
+  // Per-job inline status messages for verify / rotate-key
+  const [jobMsg, setJobMsg] = useState<Record<string, { text: string; ok: boolean }>>({});
+  const setMsg = (id: string, text: string, ok: boolean) => setJobMsg((p) => ({ ...p, [id]: { text, ok } }));
+
+  const verifyMut = useMutation({
+    mutationFn: api.verifyJob,
+    onSuccess: (_, id) => setMsg(id, "Deep verification started on agent…", true),
+    onError: (e: Error, id) => setMsg(id, `Error: ${e.message}`, false),
+  });
+  const rotateMut = useMutation({
+    mutationFn: api.rotateJobKey,
+    onSuccess: (_, id) => setMsg(id, "Key rotation started — agent is re-keying all destinations…", true),
+    onError: (e: Error, id) => setMsg(id, `Error: ${e.message}`, false),
+  });
+
+  // Listen for verify_result / rotate_key_result from WS to update job list
+  const wsRef = useRef<WebSocket | null>(null);
+  useEffect(() => {
+    const ws = new WebSocket(config.wsUrl);
+    wsRef.current = ws;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "ui_connect" }));
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "verify_result") {
+          const ok = msg.status === "passed";
+          setMsg(msg.jobId, ok ? "Verification passed — data intact." : `Verification FAILED: ${msg.message}`, ok);
+          qc.invalidateQueries({ queryKey: ["jobs"] });
+        } else if (msg.type === "rotate_key_result") {
+          const ok = msg.status === "success";
+          setMsg(msg.jobId, ok ? "Key rotation complete — new password active." : `Key rotation failed: ${msg.message}`, ok);
+          qc.invalidateQueries({ queryKey: ["jobs"] });
+        }
+      } catch { /**/ }
+    };
+    return () => ws.close();
+  }, [qc]);
+
   return (
     <div>
       <div className="page-header">
@@ -42,45 +81,82 @@ export default function Jobs() {
         <div className="card">
           <table>
             <thead>
-              <tr><th>Name</th><th>Agent</th><th>Schedule</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>Agent</th><th>Schedule</th><th>Status</th><th>Last verified</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {jobs.map((j) => {
                 const agent = agents.find((a) => a.id === j.agentId);
+                const msg = jobMsg[j.id];
                 return (
-                  <tr key={j.id}>
-                    <td style={{ fontWeight: 500 }}>{j.name}</td>
-                    <td style={{ color: "var(--text-muted)" }}>{agent?.name ?? j.agentId.slice(0, 8)}</td>
-                    <td><code style={{ fontSize: 12, color: "var(--text-muted)" }}>{j.schedule ?? "Manual"}</code></td>
-                    <td>
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        <span className={`badge ${j.enabled ? "badge-success" : "badge-muted"}`}>
-                          {j.enabled ? "Enabled" : "Disabled"}
-                        </span>
-                        {j.wormEnabled && (
-                          <span className="badge badge-warning" title={`WORM: ${j.wormRetentionDays}d retention`} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                            <Lock size={10} /> WORM
+                  <>
+                    <tr key={j.id}>
+                      <td style={{ fontWeight: 500 }}>{j.name}</td>
+                      <td style={{ color: "var(--text-muted)" }}>{agent?.name ?? j.agentId.slice(0, 8)}</td>
+                      <td><code style={{ fontSize: 12, color: "var(--text-muted)" }}>{j.schedule ?? "Manual"}</code></td>
+                      <td>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          <span className={`badge ${j.enabled ? "badge-success" : "badge-muted"}`}>
+                            {j.enabled ? "Enabled" : "Disabled"}
                           </span>
+                          {j.wormEnabled && (
+                            <span className="badge badge-warning" title={`WORM: ${j.wormRetentionDays}d retention`} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                              <Lock size={10} /> WORM
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        {j.lastVerifiedAt ? (
+                          <span style={{ color: j.lastVerifyStatus === "passed" ? "var(--success, #22c55e)" : j.lastVerifyStatus === "failed" ? "var(--danger)" : "var(--text-muted)" }}>
+                            {j.lastVerifyStatus === "passed" ? "✓" : j.lastVerifyStatus === "failed" ? "✗" : ""}{" "}
+                            {new Date(j.lastVerifiedAt).toLocaleDateString()}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)" }}>Never</span>
                         )}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Run now"
-                          onClick={() => runMut.mutate(j.id)} disabled={runMut.isPending}>
-                          <Play size={13} color="var(--success)" />
-                        </button>
-                        <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Edit"
-                          onClick={() => { setEditJob(j); setShowForm(true); }}>
-                          <Pencil size={13} />
-                        </button>
-                        <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Delete"
-                          onClick={() => { if (confirm(`Delete job "${j.name}"?`)) deleteMut.mutate(j.id); }}>
-                          <Trash2 size={13} color="var(--danger)" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Run now"
+                            onClick={() => runMut.mutate(j.id)} disabled={runMut.isPending}>
+                            <Play size={13} color="var(--success)" />
+                          </button>
+                          <button className="btn-ghost" style={{ padding: "4px 8px" }}
+                            title="Deep verify — checks 25% of stored data packs for corruption"
+                            onClick={() => { setMsg(j.id, "", true); verifyMut.mutate(j.id); }}
+                            disabled={verifyMut.isPending}>
+                            <ShieldCheck size={13} color="var(--primary)" />
+                          </button>
+                          <button className="btn-ghost" style={{ padding: "4px 8px" }}
+                            title="Rotate encryption key — generates a new repository password"
+                            onClick={() => {
+                              if (confirm(`Rotate encryption key for "${j.name}"?\n\nA new restic password will be generated and added to all destinations. The old password is removed after confirmation from the agent.`)) {
+                                setMsg(j.id, "", true);
+                                rotateMut.mutate(j.id);
+                              }
+                            }}
+                            disabled={rotateMut.isPending}>
+                            <KeyRound size={13} color="var(--warning, #f59e0b)" />
+                          </button>
+                          <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Edit"
+                            onClick={() => { setEditJob(j); setShowForm(true); }}>
+                            <Pencil size={13} />
+                          </button>
+                          <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Delete"
+                            onClick={() => { if (confirm(`Delete job "${j.name}"?`)) deleteMut.mutate(j.id); }}>
+                            <Trash2 size={13} color="var(--danger)" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {msg?.text && (
+                      <tr key={`${j.id}-msg`}>
+                        <td colSpan={6} style={{ padding: "3px 12px 8px", fontSize: 12, color: msg.ok ? "var(--success, #22c55e)" : "var(--danger)" }}>
+                          {msg.text}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>

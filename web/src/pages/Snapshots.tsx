@@ -278,7 +278,7 @@ export default function Snapshots() {
                       <td>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                           {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          {(s.status === "success" || s.status === "warning") && s.status !== "orphaned" && (
+                          {(s.status === "success" || s.status === "warning") && (
                             <button className="btn-ghost" style={{ padding: "3px 6px" }} title="Restore"
                               onClick={(e) => {
                                 e.stopPropagation();
