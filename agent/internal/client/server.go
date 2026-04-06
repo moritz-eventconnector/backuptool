@@ -19,6 +19,7 @@ type ServerClient struct {
 	ServerURL string
 	AgentID   string
 	ApiToken  string
+	Version   string
 	httpCli   *http.Client
 }
 
@@ -277,6 +278,7 @@ func (c *ServerClient) ConnectWebSocket() (*websocket.Conn, error) {
 		"type":    "agent_connect",
 		"agentId": c.AgentID,
 		"token":   c.ApiToken,
+		"version": c.Version,
 	}
 	if err := conn.WriteJSON(msg); err != nil {
 		conn.Close()

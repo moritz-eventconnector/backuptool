@@ -112,6 +112,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Create server client: %v", err)
 	}
+	srv.Version = version
 
 	// ── Self-update check ─────────────────────────────────────────────────────
 	// Check if the server has a newer binary. If so, download it, replace the
