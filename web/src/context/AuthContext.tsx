@@ -29,8 +29,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const login = async (email: string, password: string) => {
-    const { user } = await api.login(email, password);
-    setUser(user);
+    const result = await api.login(email, password);
+    if ("requireTotp" in result) {
+      // TOTP required — Login page handles the next step; throw so Login.tsx knows
+      throw Object.assign(new Error("totp_required"), { totpToken: result.totpToken });
+    }
+    setUser(result.user);
   };
 
   const logout = async () => {

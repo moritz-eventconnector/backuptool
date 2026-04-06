@@ -4,12 +4,14 @@ import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
 import { users, refreshTokens, auditLog } from "../db/schema/index.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
-import { signAccessToken, verifyAccessToken, refreshTokenTtlMs, getPublicKey } from "../auth/jwt.js";
+import { signAccessToken, verifyAccessToken, refreshTokenTtlMs, getPublicKey, signTotpPendingToken, verifyTotpPendingToken } from "../auth/jwt.js";
 import { randomToken, sha256 } from "../crypto/encryption.js";
 import { requireAuth } from "../auth/middleware.js";
 import { eq, and, gt } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { config } from "../config.js";
+import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
+import qrcode from "qrcode";
 
 export const authRouter = Router();
 
@@ -73,6 +75,13 @@ authRouter.post("/login", async (req, res) => {
     return;
   }
 
+  // If TOTP is enabled, issue a short-lived pending token instead of full auth
+  if (user.totpEnabled && user.totpSecret) {
+    const totpToken = signTotpPendingToken(user.id);
+    res.json({ requireTotp: true, totpToken });
+    return;
+  }
+
   const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role });
   const rawRefreshToken = randomToken(48);
   const tokenHash = sha256(rawRefreshToken);
@@ -99,6 +108,118 @@ authRouter.post("/login", async (req, res) => {
     user: { id: user.id, email: user.email, name: user.name, role: user.role },
     accessToken,
   });
+});
+
+// POST /api/auth/totp/verify — complete login when TOTP is required
+authRouter.post("/totp/verify", async (req, res) => {
+  const { totpToken, code } = req.body as { totpToken?: string; code?: string };
+  if (!totpToken || !code) {
+    res.status(400).json({ error: "totpToken and code are required" });
+    return;
+  }
+
+  let payload: { sub: string; type: string };
+  try {
+    payload = verifyTotpPendingToken(totpToken);
+  } catch {
+    res.status(401).json({ error: "Invalid or expired TOTP token" });
+    return;
+  }
+
+  if (payload.type !== "totp_pending") {
+    res.status(401).json({ error: "Invalid token type" });
+    return;
+  }
+
+  const db = getDb();
+  const [user] = db.select().from(users).where(eq(users.id, payload.sub)).all();
+  if (!user || !user.totpSecret || !user.totpEnabled) {
+    res.status(401).json({ error: "User not found or TOTP not enabled" });
+    return;
+  }
+
+  const verifyResult = totpVerifySync({ token: code, secret: user.totpSecret });
+  if (!verifyResult.valid) {
+    res.status(401).json({ error: "Invalid TOTP code" });
+    return;
+  }
+
+  const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role });
+  const rawRefreshToken = randomToken(48);
+  const tokenHash = sha256(rawRefreshToken);
+  const expiresAt = new Date(Date.now() + refreshTokenTtlMs()).toISOString();
+
+  db.insert(refreshTokens).values({ id: nanoid(), userId: user.id, tokenHash, expiresAt }).run();
+  db.insert(auditLog).values({
+    id: nanoid(),
+    userId: user.id,
+    action: "login",
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  }).run();
+
+  setTokenCookies(req, res, accessToken, rawRefreshToken);
+  res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role }, accessToken });
+});
+
+// POST /api/auth/totp/setup — generate TOTP secret + QR for currently logged-in user
+authRouter.post("/totp/setup", requireAuth, async (req, res) => {
+  const db = getDb();
+  const [user] = db.select().from(users).where(eq(users.id, req.user!.id)).all();
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (user.totpEnabled) { res.status(409).json({ error: "TOTP is already enabled" }); return; }
+
+  const secret = totpGenerateSecret();
+  // Store the unconfirmed secret (totpEnabled stays false until confirmed)
+  db.update(users).set({ totpSecret: secret, updatedAt: new Date().toISOString() }).where(eq(users.id, user.id)).run();
+
+  const otpAuthUrl = totpGenerateURI({ issuer: "BackupTool", label: user.email, secret });
+  const qrDataUrl = await qrcode.toDataURL(otpAuthUrl);
+
+  res.json({ secret, otpAuthUrl, qrDataUrl });
+});
+
+// POST /api/auth/totp/confirm — verify code to activate TOTP
+authRouter.post("/totp/confirm", requireAuth, (req, res) => {
+  const { code } = req.body as { code?: string };
+  if (!code) { res.status(400).json({ error: "code is required" }); return; }
+
+  const db = getDb();
+  const [user] = db.select().from(users).where(eq(users.id, req.user!.id)).all();
+  if (!user || !user.totpSecret) {
+    res.status(400).json({ error: "Run /totp/setup first" });
+    return;
+  }
+
+  const verifyResult2 = totpVerifySync({ token: code, secret: user.totpSecret });
+  if (!verifyResult2.valid) { res.status(401).json({ error: "Invalid TOTP code" }); return; }
+
+  db.update(users).set({ totpEnabled: true, updatedAt: new Date().toISOString() }).where(eq(users.id, user.id)).run();
+  db.insert(auditLog).values({
+    id: nanoid(), userId: user.id, action: "totp_enabled", ip: req.ip, userAgent: req.headers["user-agent"],
+  }).run();
+
+  res.json({ message: "Two-factor authentication enabled" });
+});
+
+// POST /api/auth/totp/disable — disable TOTP (requires current password)
+authRouter.post("/totp/disable", requireAuth, async (req, res) => {
+  const { password } = req.body as { password?: string };
+  if (!password) { res.status(400).json({ error: "password is required" }); return; }
+
+  const db = getDb();
+  const [user] = db.select().from(users).where(eq(users.id, req.user!.id)).all();
+  if (!user || !user.passwordHash) { res.status(404).json({ error: "User not found" }); return; }
+
+  const valid = await verifyPassword(password, user.passwordHash);
+  if (!valid) { res.status(401).json({ error: "Invalid password" }); return; }
+
+  db.update(users).set({ totpEnabled: false, totpSecret: null, updatedAt: new Date().toISOString() }).where(eq(users.id, user.id)).run();
+  db.insert(auditLog).values({
+    id: nanoid(), userId: user.id, action: "totp_disabled", ip: req.ip, userAgent: req.headers["user-agent"],
+  }).run();
+
+  res.json({ message: "Two-factor authentication disabled" });
 });
 
 // POST /api/auth/logout
@@ -184,6 +305,7 @@ authRouter.get("/me", requireAuth, (req, res) => {
     name: users.name,
     role: users.role,
     ssoProvider: users.ssoProvider,
+    totpEnabled: users.totpEnabled,
     createdAt: users.createdAt,
   }).from(users).where(eq(users.id, req.user!.id)).all();
 
