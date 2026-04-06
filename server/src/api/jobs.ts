@@ -90,6 +90,11 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
   const resticPassword = randomToken(24);
   const resticPasswordEncrypted = encrypt(resticPassword);
 
+  // Per-job repo suffix: isolates this job's restic repository within a shared destination bucket.
+  // Example: two jobs using "s3:endpoint/bucket" get repos at "s3:endpoint/bucket/jXxYzW" and
+  // "s3:endpoint/bucket/kAbCdE" so they never interfere with each other.
+  const resticRepoSuffix = nanoid(8);
+
   const id = nanoid();
   db.insert(backupJobs).values({
     id,
@@ -100,6 +105,7 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
     schedule: parse.data.schedule,
     retention: JSON.stringify(parse.data.retention),
     resticPasswordEncrypted,
+    resticRepoSuffix,
     preScript: parse.data.preScript,
     postScript: parse.data.postScript,
     excludePatterns: JSON.stringify(parse.data.excludePatterns),

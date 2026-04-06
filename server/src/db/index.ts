@@ -244,11 +244,12 @@ export async function initDb(): Promise<void> {
   // Add audit_log columns for existing databases.
   try { sqlite.exec(`ALTER TABLE audit_log ADD COLUMN user_email TEXT;`); } catch { /* exists */ }
 
-  // Add backup_jobs columns for deep verify + key rotation.
+  // Add backup_jobs columns for deep verify, key rotation, and per-job repo isolation.
   for (const [col, def] of [
     ["last_verified_at", "TEXT"],
     ["last_verify_status", "TEXT"],
     ["restic_password_pending", "TEXT"],
+    ["restic_repo_suffix", "TEXT"],
   ] as [string, string][]) {
     try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
   }
