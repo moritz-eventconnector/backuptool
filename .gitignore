@@ -12,6 +12,10 @@ licenser/bin/
 cli/bin/
 *.exe
 *.test
+agent/agent-linux-amd64
+agent/agent-linux-arm64
+agent/agent-darwin-amd64
+agent/agent-darwin-arm64
 
 # Build output
 build/
