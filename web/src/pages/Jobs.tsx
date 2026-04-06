@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Job, type DiscoveredService } from "../api/client.ts";
 import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp, ShieldCheck, KeyRound, RefreshCw } from "lucide-react";
 import { CronPicker } from "../components/CronPicker.tsx";
-import { config } from "../config.ts";
+import { useWsEvent } from "../context/WebSocketContext.tsx";
 
 export default function Jobs() {
   const qc = useQueryClient();
@@ -48,28 +48,20 @@ export default function Jobs() {
     onError: (e: Error, id) => setMsg(id, `Error: ${e.message}`, false),
   });
 
-  // Listen for verify_result / rotate_key_result from WS to update job list
-  const wsRef = useRef<WebSocket | null>(null);
-  useEffect(() => {
-    const ws = new WebSocket(config.wsUrl);
-    wsRef.current = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ type: "ui_connect" }));
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "verify_result") {
-          const ok = msg.status === "passed";
-          setMsg(msg.jobId, ok ? "Verification passed — data intact." : `Verification FAILED: ${msg.message}`, ok);
-          qc.invalidateQueries({ queryKey: ["jobs"] });
-        } else if (msg.type === "rotate_key_result") {
-          const ok = msg.status === "success";
-          setMsg(msg.jobId, ok ? "Key rotation complete — new password active." : `Key rotation failed: ${msg.message}`, ok);
-          qc.invalidateQueries({ queryKey: ["jobs"] });
-        }
-      } catch { /**/ }
-    };
-    return () => ws.close();
-  }, [qc]);
+  // Listen for verify/rotate results via global WS
+  useWsEvent(["verify_result", "rotate_key_result", "snapshot_done"], (msg) => {
+    if (msg.type === "verify_result") {
+      const ok = msg.status === "passed";
+      setMsg(msg.jobId as string, ok ? "Verification passed — data intact." : `Verification FAILED: ${msg.message}`, ok);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    } else if (msg.type === "rotate_key_result") {
+      const ok = msg.status === "success";
+      setMsg(msg.jobId as string, ok ? "Key rotation complete — new password active." : `Key rotation failed: ${msg.message ?? "unknown"}`, ok);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    } else if (msg.type === "snapshot_done") {
+      qc.invalidateQueries({ queryKey: ["snapshots"] });
+    }
+  });
 
   return (
     <div>

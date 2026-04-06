@@ -1,5 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext.tsx";
+import { WebSocketProvider } from "./context/WebSocketContext.tsx";
+import { NotificationProvider } from "./context/NotificationContext.tsx";
+import { GlobalWsNotifications } from "./context/GlobalWsNotifications.tsx";
 import Layout from "./components/Layout.tsx";
 import Login from "./pages/Login.tsx";
 import Setup from "./pages/Setup.tsx";
@@ -87,7 +90,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <WebSocketProvider>
+          <NotificationProvider>
+            <GlobalWsNotifications />
+            <AppRoutes />
+          </NotificationProvider>
+        </WebSocketProvider>
       </AuthProvider>
     </BrowserRouter>
   );

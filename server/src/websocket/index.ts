@@ -109,7 +109,7 @@ export function initWebSocket(server: Server): WebSocketServer {
             .where(eq(agents.id, agentId))
             .run();
 
-          broadcastToUi({ type: "agent_status", agentId, status: "online" });
+          broadcastToUi({ type: "agent_status", agentId, status: "online", agentName: agent.name, version: msg.version as string | undefined });
           ws.send(JSON.stringify({ type: "ack", message: "Connected" }));
           logger.info({ agentId }, "Agent connected via WebSocket");
         } else if (msg.type === "ui_connect") {
@@ -313,21 +313,32 @@ export function initWebSocket(server: Server): WebSocketServer {
           return;
         }
 
+        if (msg.type === "update_ack") {
+          // Agent acknowledges an update command — forward to UI with agent name
+          const db = getDb();
+          const [agent] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).all();
+          broadcastToUi({ type: "update_ack", agentId, agentName: agent?.name ?? agentId, status: msg.status });
+          return;
+        }
+
         if (msg.type === "verify_result") {
           const db = getDb();
           const jobId = msg.jobId as string;
           const status = msg.status as string; // "passed" | "failed"
           const checkMessage = (msg.message as string) ?? "";
           const now = new Date().toISOString();
+          let jobName: string | undefined;
 
           if (jobId) {
+            const [job] = db.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, jobId)).all();
+            jobName = job?.name;
             db.update(backupJobs)
               .set({ lastVerifiedAt: now, lastVerifyStatus: status } as Parameters<ReturnType<typeof db.update>["set"]>[0])
               .where(eq(backupJobs.id, jobId))
               .run();
             logger.info({ agentId, jobId, status }, `Deep verify ${status}`);
           }
-          broadcastToUi({ type: "verify_result", agentId, jobId, status, message: checkMessage });
+          broadcastToUi({ type: "verify_result", agentId, jobId, jobName, status, message: checkMessage });
           return;
         }
 
@@ -359,7 +370,8 @@ export function initWebSocket(server: Server): WebSocketServer {
               logger.warn({ agentId, jobId }, "Key rotation failed — keeping old password");
             }
           }
-          broadcastToUi({ type: "rotate_key_result", agentId, jobId, status });
+          const [jobRow] = jobId ? db.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, jobId)).all() : [];
+          broadcastToUi({ type: "rotate_key_result", agentId, jobId, jobName: jobRow?.name, status });
           return;
         }
 
@@ -473,7 +485,14 @@ export function initWebSocket(server: Server): WebSocketServer {
               logger.error({ err }, "Error preparing webhook notification");
             }
           }
-          broadcastToUi({ type: "snapshot_done", agentId, ...msg });
+          const jobId2 = msg.jobId as string | undefined;
+          let jobName2: string | undefined;
+          if (jobId2) {
+            const db2 = getDb();
+            const [jr] = db2.select({ name: backupJobs.name }).from(backupJobs).where(eq(backupJobs.id, jobId2)).all();
+            jobName2 = jr?.name;
+          }
+          broadcastToUi({ type: "snapshot_done", agentId, jobName: jobName2, ...msg });
           return;
         }
       }
@@ -494,7 +513,8 @@ export function initWebSocket(server: Server): WebSocketServer {
           .set({ status: "offline" })
           .where(eq(agents.id, agentId))
           .run();
-        broadcastToUi({ type: "agent_status", agentId, status: "offline" });
+        const [offlineAgent] = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).all();
+        broadcastToUi({ type: "agent_status", agentId, status: "offline", agentName: offlineAgent?.name });
         logger.info({ agentId }, "Agent disconnected");
       }
     });

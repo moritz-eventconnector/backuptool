@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
 import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw } from "lucide-react";
+import { useWsEvent } from "../context/WebSocketContext.tsx";
 
 type OsTab = "linux" | "windows" | "manual";
 
@@ -30,6 +31,20 @@ export default function Agents() {
     onError: (e: Error, id) => setUpdateMsg((m) => ({ ...m, [id]: e.message })),
   });
   const [updateMsg, setUpdateMsg] = useState<Record<string, string>>({});
+
+  // Refresh agent list on status changes and show update results inline
+  useWsEvent(["agent_status", "update_ack"], (msg) => {
+    if (msg.type === "agent_status") {
+      qc.invalidateQueries({ queryKey: ["agents"] });
+    } else if (msg.type === "update_ack") {
+      const id = msg.agentId as string;
+      const status = msg.status as string;
+      setUpdateMsg((m) => ({
+        ...m,
+        [id]: status === "already_current" ? "Already up to date." : "Updating — agent will reconnect shortly…",
+      }));
+    }
+  });
 
   const serverOrigin = window.location.origin;
 
