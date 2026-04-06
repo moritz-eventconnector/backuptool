@@ -3,7 +3,7 @@ import { useAuth } from "../context/AuthContext.tsx";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Server, Briefcase, Camera, HardDrive,
-  Key, Settings, LogOut, AlertTriangle,
+  Key, Settings, LogOut, AlertTriangle, ClipboardList,
 } from "lucide-react";
 import logoFull from "../assets/logo-full.svg";
 import { api } from "../api/client.ts";
@@ -15,6 +15,7 @@ const navItems = [
   { to: "/snapshots", label: "Snapshots", icon: Camera },
   { to: "/destinations", label: "Destinations", icon: HardDrive },
   { to: "/license", label: "License", icon: Key },
+  { to: "/audit-log", label: "Audit Log", icon: ClipboardList },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

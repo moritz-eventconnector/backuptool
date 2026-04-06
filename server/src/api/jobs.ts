@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
-import { backupJobs, agents, snapshots, notificationSettings } from "../db/schema/index.js";
+import { backupJobs, agents, snapshots, notificationSettings, destinations } from "../db/schema/index.js";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { sendToAgent } from "../websocket/index.js";
@@ -11,6 +11,7 @@ import { sendBackupNotification } from "../notifications/email.js";
 import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
 import { logger } from "../logger.js";
 import { checkOverdueBackups } from "../alerts/overdue.js";
+import { writeAuditLog } from "../middleware/audit.js";
 
 export const jobsRouter = Router();
 
@@ -73,7 +74,7 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
       .map(([f, errs]) => `${f}: ${(errs as string[]).join(", ")}`)
       .join("; ");
     const msg = fieldErrors || flat.formErrors.join("; ") || "Invalid input";
-    logger.warn({ errors: flat }, "Job creation validation failed");
+    logger.warn({ errors: flat, body: { ...req.body, preScript: req.body.preScript?.slice?.(0, 200), postScript: req.body.postScript?.slice?.(0, 200) } }, "Job creation validation failed");
     res.status(400).json({ error: msg, details: flat });
     return;
   }
@@ -114,6 +115,7 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
   sendToAgent(parse.data.agentId, { type: "sync_jobs" });
 
   const [created] = db.select().from(backupJobs).where(eq(backupJobs.id, id)).all();
+  writeAuditLog(req, "create_job", `job:${id}`, { name: parse.data.name, agentId: parse.data.agentId });
   res.status(201).json(deserializeJob(created));
 });
 
@@ -153,6 +155,7 @@ jobsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (req, res)
     .run();
 
   sendToAgent(job.agentId, { type: "sync_jobs" });
+  writeAuditLog(req, "update_job", `job:${req.params.id}`, { name: job.name });
   const [updated] = db.select().from(backupJobs).where(eq(backupJobs.id, req.params.id)).all();
   res.json(deserializeJob(updated));
 });
@@ -167,6 +170,7 @@ jobsRouter.delete("/:id", requireAuth, requireRole("admin", "operator"), (req, r
   }
   db.delete(backupJobs).where(eq(backupJobs.id, req.params.id)).run();
   sendToAgent(job.agentId, { type: "sync_jobs" });
+  writeAuditLog(req, "delete_job", `job:${req.params.id}`, { name: job.name });
   res.json({ message: "Job deleted" });
 });
 
@@ -239,7 +243,93 @@ jobsRouter.post("/:id/run", requireAuth, requireRole("admin", "operator"), (req,
     logger.error({ err }, "Error preparing start notifications");
   }
 
+  writeAuditLog(req, "run_job", `job:${req.params.id}`, { name: job.name, snapshotId });
   res.json({ snapshotId, message: "Backup triggered" });
+});
+
+// POST /api/jobs/:id/verify — trigger deep data integrity check (restic check --read-data-subset=25%)
+jobsRouter.post("/:id/verify", requireAuth, requireRole("admin", "operator"), (req, res) => {
+  const db = getDb();
+  const [job] = db.select().from(backupJobs).where(eq(backupJobs.id, req.params.id)).all();
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  // Fetch destinations with decrypted configs to send to agent
+  const destIds: string[] = JSON.parse(job.destinationIds ?? "[]");
+  const destRows = destIds.map((id) => {
+    const [d] = db.select().from(destinations).where(eq(destinations.id, id)).all();
+    if (!d) return null;
+    const config = JSON.parse(decrypt(d.configEncrypted));
+    return { id: d.id, type: d.type, name: d.name, config };
+  }).filter(Boolean);
+
+  const password = job.resticPasswordEncrypted ? decrypt(job.resticPasswordEncrypted) : "";
+
+  const sent = sendToAgent(job.agentId, {
+    type: "verify_backup",
+    jobId: job.id,
+    password,
+    destinations: destRows,
+  });
+
+  if (!sent) {
+    res.status(503).json({ error: "Agent is offline" });
+    return;
+  }
+
+  writeAuditLog(req, "verify_backup", `job:${req.params.id}`, { name: job.name });
+  res.json({ message: "Deep verification started" });
+});
+
+// POST /api/jobs/:id/rotate-key — rotate the restic repository encryption key
+jobsRouter.post("/:id/rotate-key", requireAuth, requireRole("admin"), (req, res) => {
+  const db = getDb();
+  const [job] = db.select().from(backupJobs).where(eq(backupJobs.id, req.params.id)).all();
+  if (!job || !job.resticPasswordEncrypted) {
+    res.status(404).json({ error: "Job not found or has no password" });
+    return;
+  }
+
+  const oldPassword = decrypt(job.resticPasswordEncrypted);
+  const newPassword = randomToken(28);
+  const newPasswordEncrypted = encrypt(newPassword);
+
+  // Store new password as "pending" — WS handler commits it on agent success
+  db.update(backupJobs)
+    .set({ resticPasswordPending: newPasswordEncrypted } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(backupJobs.id, req.params.id))
+    .run();
+
+  const destIds: string[] = JSON.parse(job.destinationIds ?? "[]");
+  const destRows = destIds.map((id) => {
+    const [d] = db.select().from(destinations).where(eq(destinations.id, id)).all();
+    if (!d) return null;
+    const config = JSON.parse(decrypt(d.configEncrypted));
+    return { id: d.id, type: d.type, name: d.name, config };
+  }).filter(Boolean);
+
+  const sent = sendToAgent(job.agentId, {
+    type: "rotate_key",
+    jobId: job.id,
+    oldPassword,
+    newPassword,
+    destinations: destRows,
+  });
+
+  if (!sent) {
+    // Rollback pending
+    db.update(backupJobs)
+      .set({ resticPasswordPending: null } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+      .where(eq(backupJobs.id, req.params.id))
+      .run();
+    res.status(503).json({ error: "Agent is offline" });
+    return;
+  }
+
+  writeAuditLog(req, "rotate_key", `job:${req.params.id}`, { name: job.name });
+  res.json({ message: "Key rotation started — agent will update the repository" });
 });
 
 // GET /api/jobs/:id/snapshots
@@ -255,8 +345,9 @@ jobsRouter.get("/:id/snapshots", requireAuth, (req, res) => {
 });
 
 function deserializeJob(job: typeof backupJobs.$inferSelect) {
+  const { resticPasswordEncrypted: _pw, resticPasswordPending: _ppw, ...rest } = job;
   return {
-    ...job,
+    ...rest,
     sourcePaths: JSON.parse(job.sourcePaths ?? "[]"),
     destinationIds: JSON.parse(job.destinationIds ?? "[]"),
     retention: JSON.parse(job.retention ?? "{}"),

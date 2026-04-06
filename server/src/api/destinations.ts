@@ -2,10 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getDb } from "../db/index.js";
-import { destinations } from "../db/schema/index.js";
+import { destinations, snapshots } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
+import { writeAuditLog } from "../middleware/audit.js";
 
 export const destinationsRouter = Router();
 
@@ -18,15 +19,36 @@ const createSchema = z.object({
 // GET /api/destinations
 destinationsRouter.get("/", requireAuth, (_req, res) => {
   const db = getDb();
-  const all = db.select({
-    id: destinations.id,
-    name: destinations.name,
-    type: destinations.type,
-    createdAt: destinations.createdAt,
-    updatedAt: destinations.updatedAt,
-  }).from(destinations).all();
-  // Never expose configEncrypted to the UI
-  res.json(all);
+  const all = db.select().from(destinations).all();
+  // Return safe fields + a non-sensitive repoSummary derived from config
+  const result = all.map((d) => {
+    let repoSummary = "";
+    try {
+      const cfg = JSON.parse(decrypt(d.configEncrypted)) as Record<string, unknown>;
+      const path = ((cfg.path as string) ?? "").replace(/\/$/, "");
+      switch (d.type) {
+        case "s3": case "b2": case "wasabi": case "minio": {
+          const bucket = (cfg.bucket as string) ?? "";
+          repoSummary = path ? `${bucket}/${path}` : bucket;
+          break;
+        }
+        case "local":
+          repoSummary = (cfg.path as string) ?? "";
+          break;
+        case "sftp":
+          repoSummary = `${cfg.host ?? ""}:${cfg.path ?? ""}`;
+          break;
+        case "rclone":
+          repoSummary = (cfg.remote as string) ?? "";
+          break;
+        case "gcs":
+          repoSummary = path ? `${cfg.bucket}/${path}` : (cfg.bucket as string) ?? "";
+          break;
+      }
+    } catch { /**/ }
+    return { id: d.id, name: d.name, type: d.type, repoSummary, createdAt: d.createdAt, updatedAt: d.updatedAt };
+  });
+  res.json(result);
 });
 
 // GET /api/destinations/:id — returns decrypted config (admin only)
@@ -60,6 +82,7 @@ destinationsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req
     configEncrypted,
   }).run();
 
+  writeAuditLog(req, "create_destination", `destination:${id}`, { name: parse.data.name, type: parse.data.type });
   res.status(201).json({ id, name: parse.data.name, type: parse.data.type });
 });
 
@@ -88,12 +111,46 @@ destinationsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (r
     .where(eq(destinations.id, req.params.id))
     .run();
 
+  writeAuditLog(req, "update_destination", `destination:${req.params.id}`);
   res.json({ message: "Destination updated" });
+});
+
+// POST /api/destinations/:id/reset-repo — appends a new path version so the next
+// backup initialises a fresh restic repository (fixes password-mismatch errors).
+destinationsRouter.post("/:id/reset-repo", requireAuth, requireRole("admin"), (req, res) => {
+  const db = getDb();
+  const [dest] = db.select().from(destinations).where(eq(destinations.id, req.params.id)).all();
+  if (!dest) {
+    res.status(404).json({ error: "Destination not found" });
+    return;
+  }
+
+  const config = JSON.parse(decrypt(dest.configEncrypted)) as Record<string, unknown>;
+  // Strip any previous reset suffix, then append a new timestamp-based version.
+  const base = ((config.path as string) ?? "").replace(/\/$/, "").replace(/-r\d+$/, "");
+  const ts = Math.floor(Date.now() / 1000);
+  config.path = (base ? base + "-" : "") + `r${ts}`;
+
+  db.update(destinations)
+    .set({ configEncrypted: encrypt(JSON.stringify(config)), updatedAt: new Date().toISOString() } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(destinations.id, req.params.id))
+    .run();
+
+  // Mark all snapshots stored at this destination as orphaned — they can no longer be restored
+  // because they were encrypted with the old repository key.
+  db.update(snapshots)
+    .set({ status: "orphaned" } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+    .where(eq(snapshots.destinationId, req.params.id))
+    .run();
+
+  writeAuditLog(req, "reset_destination_repo", `destination:${req.params.id}`, { newPath: config.path });
+  res.json({ message: "Repository reset. Next backup will initialise a fresh repository at the new path.", newPath: config.path });
 });
 
 // DELETE /api/destinations/:id
 destinationsRouter.delete("/:id", requireAuth, requireRole("admin"), (req, res) => {
   const db = getDb();
   db.delete(destinations).where(eq(destinations.id, req.params.id)).run();
+  writeAuditLog(req, "delete_destination", `destination:${req.params.id}`);
   res.json({ message: "Destination deleted" });
 });

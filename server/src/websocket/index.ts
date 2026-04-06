@@ -22,6 +22,8 @@
  */
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
+import type { IncomingMessage } from "http";
+import type { TLSSocket } from "tls";
 import { logger } from "../logger.js";
 import { getDb } from "../db/index.js";
 import { agents, snapshots, snapshotLogs, notificationSettings, backupJobs } from "../db/schema/index.js";
@@ -41,9 +43,18 @@ const uiConnections = new Set<WebSocket>();
 export function initWebSocket(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server, path: "/ws" });
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req: IncomingMessage) => {
     let identified = false;
     let isUi = false;
+    // Capture TLS peer cert fingerprint once on connection (for mTLS enforcement)
+    let peerFingerprint: string | null = null;
+    try {
+      const tlsSock = req.socket as TLSSocket;
+      const cert = tlsSock.getPeerCertificate?.();
+      if (cert?.fingerprint256) {
+        peerFingerprint = cert.fingerprint256.replace(/:/g, "").toLowerCase();
+      }
+    } catch { /* plain HTTP — no client cert */ }
 
     const heartbeatInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -71,6 +82,21 @@ export function initWebSocket(server: Server): WebSocketServer {
           if (!agent || !agent.apiToken || agent.apiToken !== sha256(token)) {
             ws.close(4001, "Unauthorized");
             return;
+          }
+
+          // mTLS: if a cert fingerprint is registered for this agent, enforce it
+          if (agent.certFingerprint) {
+            const stored = agent.certFingerprint.replace(/:/g, "").toLowerCase();
+            if (peerFingerprint && peerFingerprint !== stored) {
+              ws.close(4003, "Certificate fingerprint mismatch");
+              logger.warn({ agentId, peerFingerprint, stored }, "mTLS fingerprint mismatch — connection rejected");
+              return;
+            }
+            // If no TLS cert presented (plain HTTP / reverse proxy), we allow through
+            // but log a warning so operators know enforcement is partial.
+            if (!peerFingerprint) {
+              logger.warn({ agentId }, "Agent has a registered cert fingerprint but connected without mTLS (plain WS)");
+            }
           }
 
           identified = true;
@@ -284,6 +310,56 @@ export function initWebSocket(server: Server): WebSocketServer {
             }
           }
           broadcastToUi({ type: "check_result", agentId, ...msg });
+          return;
+        }
+
+        if (msg.type === "verify_result") {
+          const db = getDb();
+          const jobId = msg.jobId as string;
+          const status = msg.status as string; // "passed" | "failed"
+          const checkMessage = (msg.message as string) ?? "";
+          const now = new Date().toISOString();
+
+          if (jobId) {
+            db.update(backupJobs)
+              .set({ lastVerifiedAt: now, lastVerifyStatus: status } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+              .where(eq(backupJobs.id, jobId))
+              .run();
+            logger.info({ agentId, jobId, status }, `Deep verify ${status}`);
+          }
+          broadcastToUi({ type: "verify_result", agentId, jobId, status, message: checkMessage });
+          return;
+        }
+
+        if (msg.type === "rotate_key_result") {
+          const db = getDb();
+          const jobId = msg.jobId as string;
+          const status = msg.status as string; // "success" | "failed"
+
+          if (jobId) {
+            const [job] = db.select({ resticPasswordPending: backupJobs.resticPasswordPending })
+              .from(backupJobs).where(eq(backupJobs.id, jobId)).all();
+
+            if (status === "success" && job?.resticPasswordPending) {
+              // Commit new password
+              db.update(backupJobs)
+                .set({
+                  resticPasswordEncrypted: job.resticPasswordPending,
+                  resticPasswordPending: null,
+                } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+                .where(eq(backupJobs.id, jobId))
+                .run();
+              logger.info({ agentId, jobId }, "Encryption key rotation committed");
+            } else {
+              // Rotation failed — discard pending password
+              db.update(backupJobs)
+                .set({ resticPasswordPending: null } as Parameters<ReturnType<typeof db.update>["set"]>[0])
+                .where(eq(backupJobs.id, jobId))
+                .run();
+              logger.warn({ agentId, jobId }, "Key rotation failed — keeping old password");
+            }
+          }
+          broadcastToUi({ type: "rotate_key_result", agentId, jobId, status });
           return;
         }
 

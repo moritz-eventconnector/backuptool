@@ -92,6 +92,7 @@ export const api = {
   updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown> }) =>
     request(`/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteDestination: (id: string) => request(`/destinations/${id}`, { method: "DELETE" }),
+  resetDestinationRepo: (id: string) => request<{ message: string; newPath: string }>(`/destinations/${id}/reset-repo`, { method: "POST" }),
 
   // License
   getLicense: () => request<LicenseInfo>("/license"),
@@ -137,6 +138,20 @@ export const api = {
   restoreSnapshot: (id: string, restorePath: string, targetAgentId?: string, includePaths?: string[]) =>
     request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath, targetAgentId, includePaths }) }),
   getRestoreAgents: (id: string) => request<RestoreAgent[]>(`/snapshots/${id}/restore-agents`),
+
+  // Audit log
+  getAuditLogs: (params?: { action?: string; user?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.action) qs.set("action", params.action);
+    if (params?.user) qs.set("user", params.user);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return request<AuditLogEntry[]>(`/audit-logs${q ? "?" + q : ""}`);
+  },
+
+  // Backup verification + key rotation
+  verifyJob: (id: string) => request<{ message: string }>(`/jobs/${id}/verify`, { method: "POST" }),
+  rotateJobKey: (id: string) => request<{ message: string }>(`/jobs/${id}/rotate-key`, { method: "POST" }),
 };
 
 // Types
@@ -184,8 +199,22 @@ export interface Job {
   retryDelaySeconds: number;
   wormEnabled: boolean;
   wormRetentionDays: number;
+  lastVerifiedAt?: string | null;
+  lastVerifyStatus?: "passed" | "failed" | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  action: string;
+  resource?: string | null;
+  details?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  createdAt: string;
 }
 
 export interface Snapshot {
@@ -196,7 +225,7 @@ export interface Snapshot {
   sizeBytes?: number;
   fileCount?: number;
   durationSeconds?: number;
-  status: "running" | "success" | "failed" | "cancelled" | "warning";
+  status: "running" | "success" | "failed" | "cancelled" | "warning" | "orphaned";
   errorMessage?: string;
   integrityCheckStatus?: "passed" | "failed" | null;
   startedAt: string;
@@ -225,7 +254,9 @@ export interface Destination {
   id: string;
   name: string;
   type: string;
+  repoSummary?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface NotificationSettings {
