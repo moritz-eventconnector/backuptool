@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
 import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw } from "lucide-react";
@@ -25,24 +25,37 @@ export default function Agents() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
   });
 
+  const [updateMsg, setUpdateMsg] = useState<Record<string, { text: string; ok: boolean | null }>>({});
+  // Track which agents currently have an update in flight
+  const pendingUpdates = useRef<Set<string>>(new Set());
+
   const updateMut = useMutation({
     mutationFn: (id: string) => api.updateAgent(id),
-    onSuccess: (_, id) => setUpdateMsg((m) => ({ ...m, [id]: "Update command sent — agent is restarting…" })),
-    onError: (e: Error, id) => setUpdateMsg((m) => ({ ...m, [id]: e.message })),
+    onSuccess: (_, id) => {
+      pendingUpdates.current.add(id);
+      setUpdateMsg((m) => ({ ...m, [id]: { text: "Command sent — waiting for agent…", ok: null } }));
+    },
+    onError: (e: Error, id) => setUpdateMsg((m) => ({ ...m, [id]: { text: e.message, ok: false } })),
   });
-  const [updateMsg, setUpdateMsg] = useState<Record<string, string>>({});
 
-  // Refresh agent list on status changes and show update results inline
   useWsEvent(["agent_status", "update_ack"], (msg) => {
-    if (msg.type === "agent_status") {
-      qc.invalidateQueries({ queryKey: ["agents"] });
-    } else if (msg.type === "update_ack") {
+    if (msg.type === "update_ack") {
       const id = msg.agentId as string;
       const status = msg.status as string;
-      setUpdateMsg((m) => ({
-        ...m,
-        [id]: status === "already_current" ? "Already up to date." : "Updating — agent will reconnect shortly…",
-      }));
+      if (status === "already_current") {
+        pendingUpdates.current.delete(id);
+        setUpdateMsg((m) => ({ ...m, [id]: { text: "Already up to date.", ok: true } }));
+      } else if (status === "checking") {
+        setUpdateMsg((m) => ({ ...m, [id]: { text: "Downloading update…", ok: null } }));
+      }
+    } else if (msg.type === "agent_status") {
+      const id = msg.agentId as string;
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      if (msg.status === "online" && pendingUpdates.current.has(id)) {
+        pendingUpdates.current.delete(id);
+        const version = msg.version as string | undefined;
+        setUpdateMsg((m) => ({ ...m, [id]: { text: `Updated successfully${version ? ` — now v${version}` : ""}`, ok: true } }));
+      }
     }
   });
 
@@ -103,16 +116,23 @@ export default function Agents() {
                   <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.version}</td>
                   <td>
                     <div style={{ display: "flex", gap: 4, alignItems: "center", justifyContent: "flex-end" }}>
-                      {updateMsg[a.id] && (
-                        <span style={{ fontSize: 11, color: updateMsg[a.id].startsWith("Update command") ? "var(--success, #22c55e)" : "var(--danger)", marginRight: 4 }}>
-                          {updateMsg[a.id]}
+                      {updateMsg[a.id]?.text && (
+                        <span style={{
+                          fontSize: 11, marginRight: 4,
+                          color: updateMsg[a.id].ok === true ? "var(--success, #22c55e)"
+                               : updateMsg[a.id].ok === false ? "var(--danger)"
+                               : "var(--text-muted)",
+                          display: "flex", alignItems: "center", gap: 4,
+                        }}>
+                          {updateMsg[a.id].ok === null && <span className="spinner" style={{ width: 10, height: 10 }} />}
+                          {updateMsg[a.id].text}
                         </span>
                       )}
                       <button className="btn-ghost" style={{ padding: "4px 8px" }}
                         title={a.status === "online" ? "Push update to agent" : "Agent offline — restart service to auto-update"}
                         disabled={updateMut.isPending}
                         onClick={() => {
-                          setUpdateMsg((m) => ({ ...m, [a.id]: "" }));
+                          setUpdateMsg((m) => ({ ...m, [a.id]: { text: "", ok: null } }));
                           updateMut.mutate(a.id);
                         }}>
                         <RefreshCw size={13} color={a.status === "online" ? "var(--primary)" : "var(--text-muted)"} />
