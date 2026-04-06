@@ -28,21 +28,31 @@ export default function Agents() {
   const [updateMsg, setUpdateMsg] = useState<Record<string, { text: string; ok: boolean | null }>>({});
   // Track which agents currently have an update in flight
   const pendingUpdates = useRef<Set<string>>(new Set());
+  const updateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const updateMut = useMutation({
     mutationFn: (id: string) => api.updateAgent(id),
     onSuccess: (_, id) => {
       pendingUpdates.current.add(id);
       setUpdateMsg((m) => ({ ...m, [id]: { text: "Command sent — waiting for agent…", ok: null } }));
+      // Timeout: if no ack in 30s, show error
+      clearTimeout(updateTimers.current.get(id));
+      updateTimers.current.set(id, setTimeout(() => {
+        if (pendingUpdates.current.has(id)) {
+          pendingUpdates.current.delete(id);
+          setUpdateMsg((m) => ({ ...m, [id]: { text: "No response from agent — check server logs or restart agent service manually", ok: false } }));
+        }
+      }, 30_000));
     },
     onError: (e: Error, id) => setUpdateMsg((m) => ({ ...m, [id]: { text: e.message, ok: false } })),
   });
 
-  useWsEvent(["agent_status", "update_ack"], (msg) => {
+  useWsEvent(["agent_status", "update_ack"] as const, (msg) => {
     if (msg.type === "update_ack") {
       const id = msg.agentId as string;
       const status = msg.status as string;
       if (status === "already_current") {
+        clearTimeout(updateTimers.current.get(id));
         pendingUpdates.current.delete(id);
         setUpdateMsg((m) => ({ ...m, [id]: { text: "Already up to date.", ok: true } }));
       } else if (status === "checking") {
@@ -52,6 +62,7 @@ export default function Agents() {
       const id = msg.agentId as string;
       qc.invalidateQueries({ queryKey: ["agents"] });
       if (msg.status === "online" && pendingUpdates.current.has(id)) {
+        clearTimeout(updateTimers.current.get(id));
         pendingUpdates.current.delete(id);
         const version = msg.version as string | undefined;
         setUpdateMsg((m) => ({ ...m, [id]: { text: `Updated successfully${version ? ` — now v${version}` : ""}`, ok: true } }));
