@@ -34,7 +34,7 @@ export default function Snapshots() {
   const [bulkMsg, setBulkMsg] = useState("");
 
   // WebSocket events via global connection
-  useWsEvent(["restore_result", "restore_progress", "progress", "snapshot_done", "check_result"], (msg) => {
+  useWsEvent(["restore_result", "restore_progress", "progress", "snapshot_done", "check_result"] as const, (msg) => {
     if (msg.type === "restore_result") {
       setRestoreRunning(false);
       setRestorePercent(null);

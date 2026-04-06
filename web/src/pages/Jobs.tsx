@@ -49,7 +49,7 @@ export default function Jobs() {
   });
 
   // Listen for verify/rotate results via global WS
-  useWsEvent(["verify_result", "rotate_key_result", "snapshot_done"], (msg) => {
+  useWsEvent(["verify_result", "rotate_key_result", "snapshot_done"] as const, (msg) => {
     if (msg.type === "verify_result") {
       const ok = msg.status === "passed";
       setMsg(msg.jobId as string, ok ? "Verification passed — data intact." : `Verification FAILED: ${msg.message}`, ok);

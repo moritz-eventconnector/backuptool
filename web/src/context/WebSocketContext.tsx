@@ -71,16 +71,21 @@ export function useWebSocket() {
   return ctx;
 }
 
-/** Convenience: subscribe to one or more message types, auto-unsubscribes on unmount */
-export function useWsEvent(type: string | string[], handler: MessageHandler) {
+/** Convenience: subscribe to one or more message types, auto-unsubscribes on unmount.
+ *  Pass a stable reference (constant / useMemo) for the type array to avoid
+ *  unnecessary effect re-runs. String keys are joined and used as the dep key. */
+export function useWsEvent(type: string | readonly string[], handler: MessageHandler) {
   const { subscribe } = useWebSocket();
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
+  // Stable string key so a fresh array literal doesn't re-trigger the effect
+  const typeKey = Array.isArray(type) ? (type as string[]).join(",") : (type as string);
 
   useEffect(() => {
-    const types = Array.isArray(type) ? type : [type];
+    const types = typeKey.split(",");
     const stable: MessageHandler = (msg) => handlerRef.current(msg);
     const unsubs = types.map((t) => subscribe(t, stable));
     return () => unsubs.forEach((u) => u());
-  }, [type, subscribe]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeKey, subscribe]);
 }
