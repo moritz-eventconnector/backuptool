@@ -154,6 +154,7 @@ export const api = {
   // Backup verification + key rotation
   verifyJob: (id: string) => request<{ message: string }>(`/jobs/${id}/verify`, { method: "POST" }),
   rotateJobKey: (id: string) => request<{ message: string }>(`/jobs/${id}/rotate-key`, { method: "POST" }),
+  resetJobRepo: (id: string) => request<{ message: string; newSuffix: string }>(`/jobs/${id}/reset-repo`, { method: "POST" }),
 };
 
 // Types

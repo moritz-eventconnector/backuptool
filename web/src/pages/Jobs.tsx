@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Job, type DiscoveredService } from "../api/client.ts";
-import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp, ShieldCheck, KeyRound } from "lucide-react";
+import { Plus, Trash2, Play, Pencil, Briefcase, Lock, Sparkles, X, ChevronDown, ChevronUp, ShieldCheck, KeyRound, RefreshCw } from "lucide-react";
 import { CronPicker } from "../components/CronPicker.tsx";
 import { config } from "../config.ts";
 
@@ -36,6 +36,15 @@ export default function Jobs() {
   const rotateMut = useMutation({
     mutationFn: api.rotateJobKey,
     onSuccess: (_, id) => setMsg(id, "Key rotation started — agent is re-keying all destinations…", true),
+    onError: (e: Error, id) => setMsg(id, `Error: ${e.message}`, false),
+  });
+  const resetRepoMut = useMutation({
+    mutationFn: api.resetJobRepo,
+    onSuccess: (_, id) => {
+      setMsg(id, "Repo path reset. Existing snapshots orphaned. A fresh isolated repo will be created on the next backup.", true);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["snapshots"] });
+    },
     onError: (e: Error, id) => setMsg(id, `Error: ${e.message}`, false),
   });
 
@@ -137,6 +146,17 @@ export default function Jobs() {
                             }}
                             disabled={rotateMut.isPending}>
                             <KeyRound size={13} color="var(--warning, #f59e0b)" />
+                          </button>
+                          <button className="btn-ghost" style={{ padding: "4px 8px" }}
+                            title="Reset repo path — assigns a new unique sub-path on the destination, fixing password conflicts when multiple jobs share a destination. Orphans existing snapshots."
+                            onClick={() => {
+                              if (confirm(`Reset repository path for "${j.name}"?\n\nThis assigns a new unique path on the destination bucket so this job no longer conflicts with others sharing the same destination.\n\nExisting snapshots will be marked orphaned and a fresh repository will be initialised on the next backup.`)) {
+                                setMsg(j.id, "", true);
+                                resetRepoMut.mutate(j.id);
+                              }
+                            }}
+                            disabled={resetRepoMut.isPending}>
+                            <RefreshCw size={13} color="var(--text-muted)" />
                           </button>
                           <button className="btn-ghost" style={{ padding: "4px 8px" }} title="Edit"
                             onClick={() => { setEditJob(j); setShowForm(true); }}>
