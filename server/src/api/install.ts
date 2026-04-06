@@ -9,7 +9,6 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
-import multer from "multer";
 import { getDb } from "../db/index.js";
 import { agents } from "../db/schema/index.js";
 import { eq } from "drizzle-orm";
@@ -42,49 +41,6 @@ function validateInstallToken(agentId: string, token: string): boolean {
 
 installRouter.get("/binary/:os/:arch", requireAuth, requireRole("admin", "operator"), (req, res) => {
   serveBinary(req, res);
-});
-
-// ── POST /api/agents/binary/:os/:arch ────────────────────────────────────────
-// Upload a new agent binary. Stored in $DATA_DIR/binaries/agent-{os}-{arch}[.exe].
-// Immediately available for agent self-update.
-
-const binaryUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      const dir = path.join(config.dataDir, "binaries");
-      fs.mkdirSync(dir, { recursive: true });
-      cb(null, dir);
-    },
-    filename: (req, _file, cb) => {
-      const { os, arch } = req.params as { os: string; arch: string };
-      const ext = os === "windows" ? ".exe" : "";
-      cb(null, `agent-${os}-${arch}${ext}`);
-    },
-  }),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB max
-  fileFilter: (_req, file, cb) => {
-    // Accept any file — binary executables have no specific MIME type
-    if (!file.originalname) { cb(new Error("No filename")); return; }
-    cb(null, true);
-  },
-});
-
-installRouter.post("/binary/:os/:arch", requireAuth, requireRole("admin"), (req, res) => {
-  const { os, arch } = req.params;
-  const validOS = ["linux", "darwin", "windows"];
-  const validArch = ["amd64", "arm64"];
-  if (!validOS.includes(os) || !validArch.includes(arch)) {
-    res.status(400).json({ error: "Invalid os or arch" });
-    return;
-  }
-  binaryUpload.single("binary")(req, res, (err) => {
-    if (err) { res.status(400).json({ error: err.message }); return; }
-    if (!req.file) { res.status(400).json({ error: "No file uploaded (field name must be 'binary')" }); return; }
-    const ext = os === "windows" ? ".exe" : "";
-    const filename = `agent-${os}-${arch}${ext}`;
-    logger.info(`Agent binary uploaded: ${filename} (${req.file.size} bytes)`);
-    res.json({ message: `Binary uploaded: ${filename}. Online agents will download it on next update check.`, filename, size: req.file.size });
-  });
 });
 
 // ── GET /api/agents/install/:agentId/:token/binary/:os/:arch ─────────────────
