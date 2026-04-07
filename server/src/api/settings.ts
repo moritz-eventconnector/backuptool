@@ -11,6 +11,7 @@ import { logger } from "../logger.js";
 import { sendBackupNotification } from "../notifications/email.js";
 import { sendWebhookNotification, type WebhookType } from "../notifications/webhook.js";
 import { config } from "../config.js";
+import { requireFeature, getCurrentLicense } from "../licensing/enforcement.js";
 
 export const settingsRouter = Router();
 
@@ -240,8 +241,8 @@ const createUserSchema = z.object({
   role: z.enum(["admin", "operator", "viewer"]).default("viewer"),
 });
 
-// POST /api/settings/users
-settingsRouter.post("/users", requireAuth, requireRole("admin"), async (req, res) => {
+// POST /api/settings/users — requires pro or enterprise (community = 1 user only)
+settingsRouter.post("/users", requireAuth, requireRole("admin"), requireFeature("multi_user"), async (req, res) => {
   const parse = createUserSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "Invalid input", details: parse.error.flatten() });

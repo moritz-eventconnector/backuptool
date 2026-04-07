@@ -106,10 +106,21 @@ export async function verifyLicense(rawJwt: string): Promise<LicenseInfo> {
 }
 
 /**
- * Checks if a feature is enabled given the current license.
+ * Features implicitly included per edition (in addition to explicit features[]).
+ *
+ * community : no extra features (1 seat, single user, no SSO, no audit log)
+ * pro       : multi_user (create additional users beyond the admin)
+ * enterprise: everything
  */
+const EDITION_FEATURES: Record<string, string[]> = {
+  community: [],
+  pro: ["multi_user"],
+  enterprise: ["multi_user", "sso", "audit_log", "worm", "k8s_agent"],
+};
+
 export function hasFeature(license: LicensePayload, feature: string): boolean {
-  return license.features.includes(feature) || license.edition === "enterprise";
+  if (license.features.includes(feature)) return true;
+  return (EDITION_FEATURES[license.edition] ?? []).includes(feature);
 }
 
 /**

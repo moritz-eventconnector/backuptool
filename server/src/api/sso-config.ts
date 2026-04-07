@@ -8,6 +8,7 @@ import { requireAuth, requireRole } from "../auth/middleware.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
 import { clearOidcConfigCache } from "./sso.js";
+import { requireFeature } from "../licensing/enforcement.js";
 
 export const ssoConfigRouter = Router();
 
@@ -61,7 +62,7 @@ const putSchema = z.object({
 });
 
 // PUT /api/settings/sso/:provider
-ssoConfigRouter.put("/sso/:provider", requireAuth, requireRole("admin"), (req, res) => {
+ssoConfigRouter.put("/sso/:provider", requireAuth, requireRole("admin"), requireFeature("sso"), (req, res) => {
   const provider = req.params.provider as Provider;
   if (!["oidc", "saml", "ldap"].includes(provider)) {
     res.status(400).json({ error: "Invalid provider. Must be oidc, saml or ldap." });

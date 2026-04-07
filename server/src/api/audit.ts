@@ -3,11 +3,12 @@ import { getDb } from "../db/index.js";
 import { auditLog } from "../db/schema/index.js";
 import { desc, gte, like, and } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
+import { requireFeature } from "../licensing/enforcement.js";
 
 export const auditRouter = Router();
 
 // GET /api/audit-logs?limit=200&action=&user=&since=
-auditRouter.get("/", requireAuth, requireRole("admin"), (req, res) => {
+auditRouter.get("/", requireAuth, requireRole("admin"), requireFeature("audit_log"), (req, res) => {
   const db = getDb();
   const limit = Math.min(parseInt((req.query.limit as string) ?? "200", 10), 1000);
   const actionFilter = (req.query.action as string) || null;
@@ -29,7 +30,7 @@ auditRouter.get("/", requireAuth, requireRole("admin"), (req, res) => {
 });
 
 // GET /api/audit-logs/export?format=csv&action=&user=&since=
-auditRouter.get("/export", requireAuth, requireRole("admin"), (req, res) => {
+auditRouter.get("/export", requireAuth, requireRole("admin"), requireFeature("audit_log"), (req, res) => {
   const db = getDb();
   const format = (req.query.format as string) || "csv";
   const actionFilter = (req.query.action as string) || null;

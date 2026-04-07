@@ -9,6 +9,7 @@ import { randomToken, sha256 } from "../crypto/encryption.js";
 import { issueAgentCert, getCACert } from "../crypto/certs.js";
 import { logger } from "../logger.js";
 import { sendToAgent, isAgentOnline } from "../websocket/index.js";
+import { requireSeat } from "../licensing/enforcement.js";
 
 export const agentsRouter = Router();
 
@@ -31,7 +32,7 @@ agentsRouter.get("/:id", requireAuth, (req, res) => {
 });
 
 // POST /api/agents/token — generate a registration token for a new agent
-agentsRouter.post("/token", requireAuth, requireRole("admin", "operator"), (req, res) => {
+agentsRouter.post("/token", requireAuth, requireRole("admin", "operator"), requireSeat(), (req, res) => {
   const token = randomToken(32);
   // Store token temporarily in a new agent record (pre-registration)
   const db = getDb();
