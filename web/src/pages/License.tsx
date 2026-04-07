@@ -5,8 +5,8 @@ import { Key, Upload, CheckCircle, AlertTriangle, Crown, Copy, Fingerprint } fro
 
 const EDITION_FEATURES: Record<string, string[]> = {
   community: ["1 agent", "Local + S3 backups", "Basic scheduling", "Email notifications", "Community support"],
-  pro: ["Unlimited agents", "All storage providers (70+)", "OIDC SSO", "3-2-1 Replication", "Email support"],
-  enterprise: ["Unlimited agents", "All storage providers", "SSO (OIDC + SAML + LDAP)", "Kubernetes agent", "Priority support", "Audit logging"],
+  pro: ["Seat-based agents (per license)", "Multiple user accounts", "All storage providers", "Email support"],
+  enterprise: ["Unlimited agents", "All storage providers", "SSO (OIDC + SAML + LDAP)", "Kubernetes agent", "WORM backups", "Audit logging", "Priority support"],
 };
 
 export default function LicensePage() {
