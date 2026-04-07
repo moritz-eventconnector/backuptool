@@ -5,6 +5,7 @@ import { getDb } from "../db/index.js";
 import { backupJobs, agents, snapshots, notificationSettings, destinations } from "../db/schema/index.js";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth/middleware.js";
+import { requireActiveLicense } from "../licensing/enforcement.js";
 import { sendToAgent } from "../websocket/index.js";
 import { encrypt, randomToken, decrypt } from "../crypto/encryption.js";
 import { sendBackupNotification } from "../notifications/email.js";
@@ -181,7 +182,7 @@ jobsRouter.delete("/:id", requireAuth, requireRole("admin", "operator"), (req, r
 });
 
 // POST /api/jobs/:id/run — trigger manual backup
-jobsRouter.post("/:id/run", requireAuth, requireRole("admin", "operator"), (req, res) => {
+jobsRouter.post("/:id/run", requireAuth, requireRole("admin", "operator"), requireActiveLicense(), (req, res) => {
   const db = getDb();
   const [job] = db.select().from(backupJobs).where(eq(backupJobs.id, req.params.id)).all();
   if (!job) {

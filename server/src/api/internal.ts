@@ -14,6 +14,7 @@ import { eq, inArray } from "drizzle-orm";
 import { decrypt, sha256 } from "../crypto/encryption.js";
 import { logger } from "../logger.js";
 import { config } from "../config.js";
+import { getCurrentLicense } from "../licensing/enforcement.js";
 
 /** Compute SHA-256 hex digest of a file, or null if the file doesn't exist. */
 async function sha256File(filePath: string): Promise<string | null> {
@@ -83,6 +84,9 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
     return [d.id, { id: d.id, name: d.name, type: d.type, config }];
   }));
 
+  // If license is expired, disable all scheduled jobs — restores still work via WebSocket
+  const licenseExpired = getCurrentLicense().expired;
+
   const result = jobs.map((job) => {
     const destIds: string[] = JSON.parse(job.destinationIds ?? "[]");
     // Inject the per-job repo suffix into each destination's config so the agent
@@ -115,7 +119,7 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
       excludePatterns: JSON.parse(job.excludePatterns ?? "[]"),
       maxRetries: job.maxRetries,
       retryDelaySeconds: job.retryDelaySeconds,
-      enabled: job.enabled,
+      enabled: licenseExpired ? false : job.enabled,
       destinations: jobDestinations,
       resticPassword,
       wormEnabled: job.wormEnabled ?? false,
@@ -123,6 +127,9 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
     };
   });
 
+  if (licenseExpired) {
+    logger.warn({ agentId }, "License expired — all scheduled backups disabled for this agent");
+  }
   logger.debug({ agentId, jobCount: result.length }, "Agent fetched job configs");
   res.json(result);
 });

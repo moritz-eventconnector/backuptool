@@ -41,6 +41,17 @@ export default function LicensePage() {
     <div>
       <div className="page-header"><h1>License</h1></div>
 
+      {/* Expired license warning */}
+      {lic?.expiresAt && new Date(lic.expiresAt) < new Date() && (
+        <div className="alert alert-error" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+          <AlertTriangle size={18} />
+          <div>
+            <strong>License expired on {new Date(lic.expiresAt).toLocaleDateString()}.</strong>
+            {" "}New backups are blocked. Restores remain fully available. Upload a renewed license to resume backups.
+          </div>
+        </div>
+      )}
+
       {/* Current License */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
