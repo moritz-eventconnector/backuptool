@@ -197,6 +197,18 @@ jobsRouter.delete("/:id", requireAuth, requireRole("admin", "operator"), (req, r
     res.status(404).json({ error: "Job not found" });
     return;
   }
+  // Block deletion if snapshots exist — without the job's restic password and
+  // destination config, those snapshots can no longer be restored.
+  const snapshotCount = db.select({ id: snapshots.id }).from(snapshots)
+    .where(eq(snapshots.jobId, req.params.id)).all().length;
+  if (snapshotCount > 0) {
+    res.status(409).json({
+      error: `Cannot delete job "${job.name}": ${snapshotCount} snapshot(s) still exist. Delete all snapshots first.`,
+      snapshotCount,
+    });
+    return;
+  }
+
   db.delete(backupJobs).where(eq(backupJobs.id, req.params.id)).run();
   sendToAgent(job.agentId, { type: "sync_jobs" });
   writeAuditLog(req, "delete_job", `job:${req.params.id}`, { name: job.name });
