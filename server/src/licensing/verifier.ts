@@ -17,11 +17,14 @@ import { getMachineFingerprint } from "./fingerprint.js";
 ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 // ---------------------------------------------------------------------------
-// VENDOR PUBLIC KEY — hardcoded at build time, do NOT move to env/config.
-// Replace this value after running: licenser keygen
-// Format: base64url-encoded raw Ed25519 public key bytes (32 bytes → 43 chars)
+// VENDOR PUBLIC KEY — set via LICENSE_PUBLIC_KEY env var (recommended) or
+// replace the placeholder below at build time.
+// Format: base64url-encoded raw Ed25519 public key (32 bytes → 43 chars)
+// Get the value from: licenser serve → shown in yellow at the top
 // ---------------------------------------------------------------------------
-const VENDOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_ED25519_PUBLIC_KEY_BASE64URL";
+const VENDOR_PUBLIC_KEY =
+  process.env.LICENSE_PUBLIC_KEY?.trim() ||
+  "REPLACE_WITH_YOUR_ED25519_PUBLIC_KEY_BASE64URL";
 
 export interface LicensePayload {
   sub: string;          // customer ID
