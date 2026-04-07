@@ -24,7 +24,7 @@ ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 // ---------------------------------------------------------------------------
 const VENDOR_PUBLIC_KEY =
   process.env.LICENSE_PUBLIC_KEY?.trim() ||
-  "REPLACE_WITH_YOUR_ED25519_PUBLIC_KEY_BASE64URL";
+  "tmbQ3lFmMfMd-k1U5IHsaXuQiBixDplwIVwd-Fc3t0o";
 
 export interface LicensePayload {
   sub: string;          // customer ID
