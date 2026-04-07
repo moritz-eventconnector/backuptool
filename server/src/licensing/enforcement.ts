@@ -15,17 +15,40 @@ export function getCurrentLicense(): LicenseInfo {
   const [row] = db.select().from(licenseTable).all();
   if (!row) return communityLicense();
 
+  const exp = row.expiresAt ? Math.floor(new Date(row.expiresAt).getTime() / 1000) : undefined;
+  const expired = exp !== undefined && exp < Math.floor(Date.now() / 1000);
+
   return {
     sub: row.customerId ?? "unknown",
     name: row.customerName ?? undefined,
     edition: row.edition as LicenseInfo["edition"],
     seats: row.seats,
     features: JSON.parse(row.features) as string[],
-    exp: row.expiresAt ? Math.floor(new Date(row.expiresAt).getTime() / 1000) : undefined,
+    exp,
     iat: Math.floor(new Date(row.activatedAt).getTime() / 1000),
-    valid: true,
-    expired: false,
+    valid: !expired,
+    expired,
     raw: "",
+  };
+}
+
+/**
+ * Express middleware — rejects with 402 if the license has expired.
+ * Restores are intentionally NOT gated — always allow data recovery.
+ */
+export function requireActiveLicense() {
+  return (_req: Request, res: Response, next: NextFunction) => {
+    const lic = getCurrentLicense();
+    if (lic.expired) {
+      res.status(402).json({
+        error: "Your license has expired. New backups are blocked until the license is renewed. Restores remain available.",
+        expiredAt: lic.exp ? new Date(lic.exp * 1000).toISOString() : null,
+        currentEdition: lic.edition,
+        upgrade: "Upload a renewed license to resume backups.",
+      });
+      return;
+    }
+    next();
   };
 }
 

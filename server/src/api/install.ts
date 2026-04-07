@@ -364,16 +364,24 @@ Write-Host "Registering agent..."
 & $BinPath --server $Server --agent-id $AgentId --token $Token --name $AgentName --config "$DataDir\\agent.yaml"
 Write-Host "  Registration complete."
 
-# ── Install as Windows Service via sc.exe ──────────────────────────────────
-$SvcName = "BackupToolAgent"
-if (Get-Service -Name $SvcName -ErrorAction SilentlyContinue) {
+# ── Install as Windows Service ─────────────────────────────────────────────
+$SvcName    = "BackupToolAgent"
+$SvcDisplay = "BackupTool Backup Agent"
+$SvcDesc    = "BackupTool backup agent — connects to $Server"
+$SvcBinPath = "\`"$BinPath\`" --server $Server --config \`"$DataDir\\agent.yaml\`""
+
+$existing = Get-Service -Name $SvcName -ErrorAction SilentlyContinue
+if ($existing) {
   Stop-Service -Name $SvcName -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
   sc.exe delete $SvcName | Out-Null
+  Start-Sleep -Seconds 2
 }
-sc.exe create $SvcName binPath= "\`"$BinPath\`" --server $Server --config \`"$DataDir\\agent.yaml\`"" start= auto DisplayName= "BackupTool Agent" | Out-Null
-sc.exe description $SvcName "BackupTool backup agent — connects to $Server" | Out-Null
+
+New-Service -Name $SvcName -BinaryPathName $SvcBinPath -StartupType Automatic -DisplayName $SvcDisplay | Out-Null
+sc.exe description $SvcName $SvcDesc | Out-Null
 Start-Service -Name $SvcName
-Write-Host "  Windows service '$SvcName' created and started."
+Write-Host "  Windows service '$SvcName' created and started." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Done! The BackupTool agent is running." -ForegroundColor Green

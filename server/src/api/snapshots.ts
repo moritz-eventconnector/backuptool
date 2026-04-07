@@ -180,25 +180,14 @@ snapshotsRouter.delete("/:id", requireAuth, (req, res) => {
   }
 
   // ── WORM enforcement ───────────────────────────────────────────────────────
-  // Look up the job to check whether WORM is active and compute the unlock date.
-  const [job] = db.select({
-    wormEnabled: backupJobs.wormEnabled,
-    wormRetentionDays: backupJobs.wormRetentionDays,
-  }).from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
-
-  if (job?.wormEnabled && job.wormRetentionDays > 0) {
-    const startedMs = new Date(snap.startedAt).getTime();
-    const unlockMs = startedMs + job.wormRetentionDays * 86_400_000;
-    const nowMs = Date.now();
-    if (nowMs < unlockMs) {
-      const unlockDate = new Date(unlockMs).toISOString();
-      res.status(423).json({
-        error: "WORM lock active: this snapshot cannot be deleted before the retention period expires",
-        lockedUntil: unlockDate,
-        wormRetentionDays: job.wormRetentionDays,
-      });
-      return;
-    }
+  // wormLockedUntil is set on the snapshot at creation time and never changes —
+  // disabling WORM on the job later does NOT unlock already-locked snapshots.
+  if (snap.wormLockedUntil && new Date(snap.wormLockedUntil) > new Date()) {
+    res.status(423).json({
+      error: "WORM lock active: this snapshot cannot be deleted before the retention period expires",
+      lockedUntil: snap.wormLockedUntil,
+    });
+    return;
   }
 
   // Per-snapshot lock (set via bulk-lock action)
@@ -241,12 +230,9 @@ snapshotsRouter.post("/bulk-delete", requireAuth, (req, res) => {
   const now = new Date();
 
   for (const snap of rows) {
-    // Check job-level WORM
-    const [job] = db.select({ wormEnabled: backupJobs.wormEnabled, wormRetentionDays: backupJobs.wormRetentionDays })
-      .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
-    if (job?.wormEnabled && job.wormRetentionDays > 0) {
-      const unlockMs = new Date(snap.startedAt).getTime() + job.wormRetentionDays * 86_400_000;
-      if (Date.now() < unlockMs) { skipped.push(snap.id); continue; }
+    // Check WORM lock (stored on snapshot at creation time — immutable)
+    if (snap.wormLockedUntil && new Date(snap.wormLockedUntil) > now) {
+      skipped.push(snap.id); continue;
     }
     // Check per-snapshot lock
     if (snap.lockedUntil && new Date(snap.lockedUntil) > now) {

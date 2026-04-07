@@ -5,8 +5,8 @@ import { Key, Upload, CheckCircle, AlertTriangle, Crown, Copy, Fingerprint } fro
 
 const EDITION_FEATURES: Record<string, string[]> = {
   community: ["1 agent", "Local + S3 backups", "Basic scheduling", "Email notifications", "Community support"],
-  pro: ["Unlimited agents", "All storage providers (70+)", "OIDC SSO", "3-2-1 Replication", "Email support"],
-  enterprise: ["Unlimited agents", "All storage providers", "SSO (OIDC + SAML + LDAP)", "Kubernetes agent", "Priority support", "Audit logging"],
+  pro: ["Seat-based agents (per license)", "Multiple user accounts", "All storage providers", "Email support"],
+  enterprise: ["Unlimited agents", "All storage providers", "SSO (OIDC + SAML + LDAP)", "Kubernetes agent", "WORM backups", "Audit logging", "Priority support"],
 };
 
 export default function LicensePage() {
@@ -40,6 +40,17 @@ export default function LicensePage() {
   return (
     <div>
       <div className="page-header"><h1>License</h1></div>
+
+      {/* Expired license warning */}
+      {lic?.expiresAt && new Date(lic.expiresAt) < new Date() && (
+        <div className="alert alert-error" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+          <AlertTriangle size={18} />
+          <div>
+            <strong>License expired on {new Date(lic.expiresAt).toLocaleDateString()}.</strong>
+            {" "}New backups are blocked. Restores remain fully available. Upload a renewed license to resume backups.
+          </div>
+        </div>
+      )}
 
       {/* Current License */}
       <div className="card" style={{ marginBottom: 20 }}>
