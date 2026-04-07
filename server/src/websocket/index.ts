@@ -382,6 +382,20 @@ export function initWebSocket(server: Server): WebSocketServer {
           const status = msg.status as string;
 
           if (snapshotId) {
+            // If job had WORM enabled at completion time, lock the snapshot for the configured period.
+            // This is stored on the snapshot itself so disabling WORM later doesn't affect existing snapshots.
+            let wormLockedUntil: string | undefined;
+            if (status === "success") {
+              const [snap] = db.select({ jobId: snapshots.jobId }).from(snapshots).where(eq(snapshots.id, snapshotId)).all();
+              if (snap?.jobId) {
+                const [job] = db.select({ wormEnabled: backupJobs.wormEnabled, wormRetentionDays: backupJobs.wormRetentionDays })
+                  .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
+                if (job?.wormEnabled && job.wormRetentionDays > 0) {
+                  wormLockedUntil = new Date(Date.now() + job.wormRetentionDays * 86_400_000).toISOString();
+                }
+              }
+            }
+
             db.update(snapshots)
               .set({
                 status,
@@ -391,6 +405,7 @@ export function initWebSocket(server: Server): WebSocketServer {
                 durationSeconds: msg.durationSeconds as number | undefined,
                 finishedAt: new Date().toISOString(),
                 errorMessage: msg.errorMessage as string | undefined,
+                ...(wormLockedUntil ? { wormLockedUntil } : {}),
               })
               .where(eq(snapshots.id, snapshotId))
               .run();

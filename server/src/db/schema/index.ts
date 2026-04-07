@@ -96,7 +96,8 @@ export const snapshots = sqliteTable("snapshots", {
   finishedAt: text("finished_at"),
   retryCount: integer("retry_count").notNull().default(0),
   integrityCheckStatus: text("integrity_check_status"), // "passed" | "failed" | null = not yet checked
-  lockedUntil: text("locked_until"), // ISO timestamp; null = not individually locked
+  lockedUntil: text("locked_until"),     // ISO timestamp; null = not individually locked
+  wormLockedUntil: text("worm_locked_until"), // ISO timestamp set at creation if job had WORM enabled; immutable
 });
 
 // ── Snapshot Logs ─────────────────────────────────────────────────────────────
