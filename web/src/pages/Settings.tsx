@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle, Globe, Lock } from "lucide-react";
+import { Mail, Shield, Users, Plus, Trash2, Webhook, CheckCircle, XCircle, Globe, Lock, KeyRound } from "lucide-react";
 import { api, type User } from "../api/client";
 
 export default function Settings() {
@@ -19,6 +19,7 @@ export default function Settings() {
               { id: "webhooks", label: "Webhooks", icon: Webhook },
               { id: "sso", label: "SSO / Auth", icon: Shield },
               { id: "users", label: "Users", icon: Users },
+              { id: "security", label: "Security (2FA)", icon: KeyRound },
             ].map((t) => (
               <button key={t.id}
                 onClick={() => setActiveTab(t.id)}
@@ -37,6 +38,7 @@ export default function Settings() {
           {activeTab === "webhooks" && <WebhookSettings />}
           {activeTab === "sso" && <SsoSettings />}
           {activeTab === "users" && <UserSettings />}
+          {activeTab === "security" && <SecuritySettings />}
         </div>
       </div>
     </div>
@@ -786,6 +788,129 @@ function UserSettings() {
         <strong>operator</strong> — create/run jobs &nbsp;|&nbsp;
         <strong>viewer</strong> — read-only
       </div>
+    </div>
+  );
+}
+
+// ── Security / 2FA ─────────────────────────────────────────────────────────────
+function SecuritySettings() {
+  const qc = useQueryClient();
+  const { data: me, isLoading } = useQuery({ queryKey: ["me-security"], queryFn: api.me });
+
+  // setup flow
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [confirmCode, setConfirmCode] = useState("");
+  const [disablePassword, setDisablePassword] = useState("");
+  const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const setupMut = useMutation({
+    mutationFn: api.totpSetup,
+    onSuccess: (data) => { setQrDataUrl(data.qrDataUrl); setSecret(data.secret); setMsg(null); },
+    onError: (e: Error) => setMsg({ type: "error", text: e.message }),
+  });
+
+  const confirmMut = useMutation({
+    mutationFn: () => api.totpConfirm(confirmCode),
+    onSuccess: () => {
+      setMsg({ type: "success", text: "Two-factor authentication enabled successfully." });
+      setQrDataUrl(null); setSecret(null); setConfirmCode("");
+      qc.invalidateQueries({ queryKey: ["me-security"] });
+    },
+    onError: (e: Error) => setMsg({ type: "error", text: e.message }),
+  });
+
+  const disableMut = useMutation({
+    mutationFn: () => api.totpDisable(disablePassword),
+    onSuccess: () => {
+      setMsg({ type: "success", text: "Two-factor authentication disabled." });
+      setDisablePassword("");
+      qc.invalidateQueries({ queryKey: ["me-security"] });
+    },
+    onError: (e: Error) => setMsg({ type: "error", text: e.message }),
+  });
+
+  if (isLoading) return <div className="card"><p style={{ color: "var(--text-muted)" }}>Loading…</p></div>;
+
+  const totpEnabled = (me as (typeof me & { totpEnabled?: boolean }) | undefined)?.totpEnabled ?? false;
+
+  return (
+    <div className="card">
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Two-Factor Authentication (TOTP)</h2>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
+        Use an authenticator app (Google Authenticator, Authy, Bitwarden, etc.) for an extra layer of security.
+      </p>
+
+      {msg && (
+        <div className={`alert alert-${msg.type}`} style={{ marginBottom: 12 }}>{msg.text}</div>
+      )}
+
+      {totpEnabled ? (
+        // ── Already enabled — show disable form ──────────────────────────────
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, color: "var(--success, #22c55e)" }}>
+            <CheckCircle size={18} />
+            <span style={{ fontWeight: 500 }}>Two-factor authentication is enabled</span>
+          </div>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
+            To disable 2FA, enter your current password to confirm.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+              <label>Current password</label>
+              <input type="password" value={disablePassword} onChange={(e) => setDisablePassword(e.target.value)} placeholder="••••••••••••" />
+            </div>
+            <button className="btn-danger" onClick={() => disableMut.mutate()} disabled={disableMut.isPending || !disablePassword} style={{ marginBottom: 0 }}>
+              {disableMut.isPending ? "Disabling…" : "Disable 2FA"}
+            </button>
+          </div>
+        </div>
+      ) : qrDataUrl ? (
+        // ── Show QR code + confirm step ──────────────────────────────────────
+        <div>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
+            Scan this QR code with your authenticator app, then enter the 6-digit code to confirm.
+          </p>
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            <img src={qrDataUrl} alt="QR code" style={{ width: 200, height: 200 }} />
+          </div>
+          <div className="form-group">
+            <label>Manual entry key</label>
+            <input readOnly value={secret ?? ""} style={{ fontFamily: "monospace", fontSize: 12, letterSpacing: "0.1em" }} onFocus={(e) => e.target.select()} />
+            <small style={{ color: "var(--text-muted)", fontSize: 11 }}>Copy this if you can't scan the QR code</small>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
+            <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+              <label>Confirmation code</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={confirmCode}
+                onChange={(e) => setConfirmCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="000000"
+                style={{ letterSpacing: "0.3em", fontSize: 18, textAlign: "center" }}
+              />
+            </div>
+            <button className="btn-primary" onClick={() => confirmMut.mutate()} disabled={confirmMut.isPending || confirmCode.length !== 6}>
+              {confirmMut.isPending ? "Verifying…" : "Enable 2FA"}
+            </button>
+          </div>
+          <button className="btn-ghost" style={{ marginTop: 8 }} onClick={() => { setQrDataUrl(null); setSecret(null); }}>Cancel</button>
+        </div>
+      ) : (
+        // ── Not enabled — show setup button ──────────────────────────────────
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, color: "var(--text-muted)" }}>
+            <XCircle size={18} />
+            <span>Two-factor authentication is not enabled</span>
+          </div>
+          <button className="btn-primary" onClick={() => setupMut.mutate()} disabled={setupMut.isPending}>
+            {setupMut.isPending ? "Generating…" : "Set up 2FA"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

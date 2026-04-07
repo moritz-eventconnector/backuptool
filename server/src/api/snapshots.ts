@@ -1,12 +1,51 @@
 import { Router } from "express";
 import { getDb } from "../db/index.js";
 import { snapshots, snapshotLogs, backupJobs, agents, destinations } from "../db/schema/index.js";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, gte, like, and } from "drizzle-orm";
 import { requireAuth } from "../auth/middleware.js";
 import { sendToAgent, isAgentOnline } from "../websocket/index.js";
 import { decrypt } from "../crypto/encryption.js";
 
 export const snapshotsRouter = Router();
+
+// GET /api/snapshots/export?format=csv&jobId=&since=&status=
+snapshotsRouter.get("/export", requireAuth, (req, res) => {
+  const db = getDb();
+  const format = (req.query.format as string) || "csv";
+  const jobIdFilter = (req.query.jobId as string) || null;
+  const since = (req.query.since as string) || null;
+  const statusFilter = (req.query.status as string) || null;
+
+  const conditions = [];
+  if (jobIdFilter) conditions.push(eq(snapshots.jobId, jobIdFilter));
+  if (since) conditions.push(gte(snapshots.startedAt, since));
+  if (statusFilter) conditions.push(like(snapshots.status, statusFilter));
+
+  const rows = db.select().from(snapshots)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(snapshots.startedAt))
+    .limit(10000)
+    .all();
+
+  if (format === "csv") {
+    const headers = ["id", "jobId", "agentId", "resticSnapshotId", "status", "sizeBytes", "fileCount", "durationSeconds", "startedAt", "finishedAt", "retryCount", "integrityCheckStatus", "errorMessage"];
+    const escape = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [
+      headers.join(","),
+      ...rows.map(r => [r.id, r.jobId, r.agentId, r.resticSnapshotId, r.status, r.sizeBytes, r.fileCount, r.durationSeconds, r.startedAt, r.finishedAt, r.retryCount, r.integrityCheckStatus, r.errorMessage].map(escape).join(",")),
+    ].join("\n");
+
+    const filename = `snapshots-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  } else {
+    res.json(rows);
+  }
+});
 
 // GET /api/snapshots — recent snapshots across all jobs
 snapshotsRouter.get("/", requireAuth, (req, res) => {

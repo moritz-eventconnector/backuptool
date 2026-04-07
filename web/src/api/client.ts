@@ -45,12 +45,20 @@ export class ApiError extends Error {
 export const api = {
   // Auth
   login: (email: string, password: string) =>
-    request<{ user: User; accessToken: string }>("/auth/login", {
+    request<{ user: User; accessToken: string } | { requireTotp: true; totpToken: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  totpVerify: (totpToken: string, code: string) =>
+    request<{ user: User; accessToken: string }>("/auth/totp/verify", {
+      method: "POST",
+      body: JSON.stringify({ totpToken, code }),
+    }),
+  totpSetup: () => request<{ secret: string; otpAuthUrl: string; qrDataUrl: string }>("/auth/totp/setup", { method: "POST" }),
+  totpConfirm: (code: string) => request<{ message: string }>("/auth/totp/confirm", { method: "POST", body: JSON.stringify({ code }) }),
+  totpDisable: (password: string) => request<{ message: string }>("/auth/totp/disable", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => request("/auth/logout", { method: "POST" }),
-  me: () => request<User>("/auth/me"),
+  me: () => request<User & { totpEnabled?: boolean }>("/auth/me"),
   setupRequired: () => request<{ setupRequired: boolean }>("/auth/setup-required"),
   register: (email: string, name: string, password: string) =>
     request("/auth/register", { method: "POST", body: JSON.stringify({ email, name, password }) }),
@@ -149,6 +157,20 @@ export const api = {
     if (params?.limit) qs.set("limit", String(params.limit));
     const q = qs.toString();
     return request<AuditLogEntry[]>(`/audit-logs${q ? "?" + q : ""}`);
+  },
+  exportAuditLogs: (params?: { action?: string; user?: string; since?: string }) => {
+    const qs = new URLSearchParams({ format: "csv" });
+    if (params?.action) qs.set("action", params.action);
+    if (params?.user) qs.set("user", params.user);
+    if (params?.since) qs.set("since", params.since);
+    window.location.href = `/api/audit-logs/export?${qs.toString()}`;
+  },
+  exportSnapshots: (params?: { jobId?: string; since?: string; status?: string }) => {
+    const qs = new URLSearchParams({ format: "csv" });
+    if (params?.jobId) qs.set("jobId", params.jobId);
+    if (params?.since) qs.set("since", params.since);
+    if (params?.status) qs.set("status", params.status);
+    window.location.href = `/api/snapshots/export?${qs.toString()}`;
   },
 
   // Backup verification + key rotation
@@ -343,4 +365,5 @@ export interface LicenseInfo {
   expiresAt?: string;
   activatedAt?: string;
   source: "default" | "uploaded";
+  fingerprint?: string; // sha256:... of this server's machine-id
 }

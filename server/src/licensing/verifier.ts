@@ -11,16 +11,20 @@
 import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { logger } from "../logger.js";
+import { getMachineFingerprint } from "./fingerprint.js";
 
 // Required for @noble/ed25519 in Node.js
 ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 // ---------------------------------------------------------------------------
-// VENDOR PUBLIC KEY — hardcoded at build time, do NOT move to env/config.
-// Replace this value after running: licenser keygen
-// Format: base64url-encoded raw Ed25519 public key bytes (32 bytes → 43 chars)
+// VENDOR PUBLIC KEY — set via LICENSE_PUBLIC_KEY env var (recommended) or
+// replace the placeholder below at build time.
+// Format: base64url-encoded raw Ed25519 public key (32 bytes → 43 chars)
+// Get the value from: licenser serve → shown in yellow at the top
 // ---------------------------------------------------------------------------
-const VENDOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_ED25519_PUBLIC_KEY_BASE64URL";
+const VENDOR_PUBLIC_KEY =
+  process.env.LICENSE_PUBLIC_KEY?.trim() ||
+  "REPLACE_WITH_YOUR_ED25519_PUBLIC_KEY_BASE64URL";
 
 export interface LicensePayload {
   sub: string;          // customer ID
@@ -75,6 +79,23 @@ export async function verifyLicense(rawJwt: string): Promise<LicenseInfo> {
   // Check expiry
   const now = Math.floor(Date.now() / 1000);
   const expired = payload.exp !== undefined && payload.exp < now;
+
+  // Fingerprint is mandatory — licenses without one are rejected
+  if (!payload.fingerprint) {
+    throw new Error(
+      `License rejected: no server fingerprint.\n` +
+      `Generate a server-bound license using --fingerprint ${getMachineFingerprint()}`
+    );
+  }
+
+  const machineFingerprint = getMachineFingerprint();
+  if (payload.fingerprint !== machineFingerprint) {
+    throw new Error(
+      `License is locked to a different server (fingerprint mismatch).\n` +
+      `Expected: ${payload.fingerprint}\n` +
+      `This server: ${machineFingerprint}`
+    );
+  }
 
   return {
     ...payload,

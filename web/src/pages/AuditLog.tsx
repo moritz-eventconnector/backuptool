@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type AuditLogEntry } from "../api/client.ts";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Download } from "lucide-react";
 
 const ACTION_COLORS: Record<string, string> = {
   login: "badge-primary",
@@ -47,6 +47,14 @@ export default function AuditLog() {
             onChange={(e) => setActionFilter(e.target.value)}
             style={{ width: 180, padding: "6px 10px", fontSize: 13 }}
           />
+          <button
+            className="btn-ghost"
+            style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)" }}
+            onClick={() => api.exportAuditLogs({ action: actionFilter || undefined, user: userFilter || undefined })}
+            title="Export as CSV"
+          >
+            <Download size={14} /> CSV
+          </button>
         </div>
       </div>
 

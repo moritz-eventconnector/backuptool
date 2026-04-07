@@ -69,3 +69,29 @@ export function verifyAccessToken(token: string): JwtPayload {
 export function refreshTokenTtlMs(): number {
   return REFRESH_TOKEN_TTL_MS;
 }
+
+// ── TOTP pending token (short-lived, HS256 with a symmetric secret) ───────────
+// Used when a user passes password but hasn't yet submitted their TOTP code.
+// We don't want to issue a full access token at this point.
+
+const TOTP_PENDING_TTL = "5m";
+// Derive a symmetric secret from the RS256 private key so we don't need extra config.
+function totpHmacSecret(): string {
+  return privateKey.slice(0, 64); // first 64 bytes of PEM text — deterministic
+}
+
+export interface TotpPendingPayload {
+  sub: string;   // user ID
+  type: "totp_pending";
+}
+
+export function signTotpPendingToken(userId: string): string {
+  return jwt.sign({ sub: userId, type: "totp_pending" }, totpHmacSecret(), {
+    algorithm: "HS256",
+    expiresIn: TOTP_PENDING_TTL,
+  });
+}
+
+export function verifyTotpPendingToken(token: string): TotpPendingPayload {
+  return jwt.verify(token, totpHmacSecret(), { algorithms: ["HS256"] }) as TotpPendingPayload;
+}

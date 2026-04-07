@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Snapshot, type SnapshotLog, type RestoreAgent } from "../api/client.ts";
-import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock, Square, CheckSquare } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock, Square, CheckSquare, Download } from "lucide-react";
 import { useWsEvent } from "../context/WebSocketContext.tsx";
 
 // Live backup progress received via WebSocket: keyed by snapshotId
@@ -134,6 +134,14 @@ export default function Snapshots() {
             <button key={s} className={statusFilter === s ? "btn-primary" : "btn-ghost"} style={{ padding: "6px 14px", textTransform: "capitalize" }}
               onClick={() => { setStatusFilter(s); setSelectedIds(new Set()); setBulkMsg(""); }}>{s}</button>
           ))}
+          <button
+            className="btn-ghost"
+            style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", marginLeft: 4 }}
+            onClick={() => api.exportSnapshots({ status: statusFilter !== "all" ? statusFilter : undefined })}
+            title="Export as CSV"
+          >
+            <Download size={14} /> CSV
+          </button>
         </div>
       </div>
 
