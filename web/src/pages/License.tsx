@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Key, Upload, CheckCircle, AlertTriangle, Crown } from "lucide-react";
+import { Key, Upload, CheckCircle, AlertTriangle, Crown, Copy, Fingerprint } from "lucide-react";
 
 const EDITION_FEATURES: Record<string, string[]> = {
   community: ["1 agent", "Local + S3 backups", "Basic scheduling", "Email notifications", "Community support"],
@@ -98,32 +98,56 @@ export default function LicensePage() {
         ))}
       </div>
 
-      {/* Upload License */}
-      {edition === "community" && (
-        <div className="card">
+      {/* Server Fingerprint */}
+      {lic?.fingerprint && (
+        <div className="card" style={{ marginBottom: 20 }}>
           <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
-            <Upload size={15} /> Activate License
+            <Fingerprint size={15} /> Server Fingerprint
           </h2>
-          <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
-            Paste your license key below. License verification is fully offline — your server never phones home.
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
+            Copy this value and paste it into the <strong>--fingerprint</strong> field when generating a license for this server.
+            Licenses with a matching fingerprint can only be used on this server.
           </p>
-          {error && <div className="alert alert-error"><AlertTriangle size={14} style={{ marginRight: 6 }} />{error}</div>}
-          {success && <div className="alert alert-success"><CheckCircle size={14} style={{ marginRight: 6 }} />{success}</div>}
-          <div className="form-group">
-            <label>License Key (JWT)</label>
-            <textarea
-              value={licenseText}
-              onChange={(e) => { setLicenseText(e.target.value); setError(""); }}
-              rows={5}
-              placeholder="eyJhbGciOiJFZERTQSJ9..."
-              style={{ fontFamily: "monospace", fontSize: 12 }}
-            />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <code style={{ flex: 1, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "8px 12px", fontFamily: "monospace", fontSize: 12, color: "var(--primary)", wordBreak: "break-all" }}>
+              {lic.fingerprint}
+            </code>
+            <button
+              className="btn-ghost"
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)" }}
+              onClick={() => { navigator.clipboard.writeText(lic.fingerprint!); }}
+              title="Copy fingerprint"
+            >
+              <Copy size={13} /> Copy
+            </button>
           </div>
-          <button className="btn-primary" disabled={!licenseText.trim() || uploadMut.isPending} onClick={() => uploadMut.mutate()}>
-            {uploadMut.isPending ? "Verifying..." : "Activate License"}
-          </button>
         </div>
       )}
+
+      {/* Upload License */}
+      <div className="card">
+        <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+          <Upload size={15} /> {edition === "community" ? "Activate License" : "Replace License"}
+        </h2>
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
+          Paste your license key below. License verification is fully offline — your server never phones home.
+        </p>
+        {error && <div className="alert alert-error"><AlertTriangle size={14} style={{ marginRight: 6 }} />{error}</div>}
+        {success && <div className="alert alert-success"><CheckCircle size={14} style={{ marginRight: 6 }} />{success}</div>}
+        <div className="form-group">
+          <label>License Key (JWT)</label>
+          <textarea
+            value={licenseText}
+            onChange={(e) => { setLicenseText(e.target.value); setError(""); }}
+            rows={5}
+            placeholder="eyJhbGciOiJFZERTQSJ9..."
+            style={{ fontFamily: "monospace", fontSize: 12 }}
+          />
+        </div>
+        <button className="btn-primary" disabled={!licenseText.trim() || uploadMut.isPending} onClick={() => uploadMut.mutate()}>
+          {uploadMut.isPending ? "Verifying..." : "Activate License"}
+        </button>
+      </div>
     </div>
   );
 }

@@ -365,4 +365,5 @@ export interface LicenseInfo {
   expiresAt?: string;
   activatedAt?: string;
   source: "default" | "uploaded";
+  fingerprint?: string; // sha256:... of this server's machine-id
 }

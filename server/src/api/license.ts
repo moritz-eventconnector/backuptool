@@ -3,17 +3,20 @@ import { getDb } from "../db/index.js";
 import { license } from "../db/schema/index.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { verifyLicense, communityLicense } from "../licensing/verifier.js";
+import { getMachineFingerprint } from "../licensing/fingerprint.js";
 import multer from "multer";
 
 export const licenseRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 } });
 
-// GET /api/license — current license info
+// GET /api/license — current license info + this server's fingerprint
 licenseRouter.get("/", requireAuth, (_req, res) => {
   const db = getDb();
   const [lic] = db.select().from(license).all();
+  const fingerprint = getMachineFingerprint();
+
   if (!lic) {
-    res.json({ ...communityLicense(), source: "default" });
+    res.json({ ...communityLicense(), source: "default", fingerprint });
     return;
   }
   // Return without rawJwt for security
@@ -26,6 +29,7 @@ licenseRouter.get("/", requireAuth, (_req, res) => {
     expiresAt: lic.expiresAt,
     activatedAt: lic.activatedAt,
     source: "uploaded",
+    fingerprint,
   });
 });
 

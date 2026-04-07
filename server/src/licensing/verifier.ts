@@ -11,6 +11,7 @@
 import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import { logger } from "../logger.js";
+import { getMachineFingerprint } from "./fingerprint.js";
 
 // Required for @noble/ed25519 in Node.js
 ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
@@ -75,6 +76,18 @@ export async function verifyLicense(rawJwt: string): Promise<LicenseInfo> {
   // Check expiry
   const now = Math.floor(Date.now() / 1000);
   const expired = payload.exp !== undefined && payload.exp < now;
+
+  // Check fingerprint if the license contains one
+  if (payload.fingerprint) {
+    const machineFingerprint = getMachineFingerprint();
+    if (payload.fingerprint !== machineFingerprint) {
+      throw new Error(
+        `License is locked to a different server (fingerprint mismatch).\n` +
+        `Expected: ${payload.fingerprint}\n` +
+        `This server: ${machineFingerprint}`
+      );
+    }
+  }
 
   return {
     ...payload,
