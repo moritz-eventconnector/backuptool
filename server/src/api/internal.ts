@@ -124,6 +124,11 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
       resticPassword,
       wormEnabled: job.wormEnabled ?? false,
       wormRetentionDays: job.wormRetentionDays ?? 0,
+      sourceType: job.sourceType ?? "local",
+      sourceConfig: (() => {
+        if (!job.sourceConfigEncrypted) return undefined;
+        try { return JSON.parse(decrypt(job.sourceConfigEncrypted)); } catch { return undefined; }
+      })(),
     };
   });
 
@@ -182,6 +187,11 @@ internalRouter.get("/agents/:agentId/jobs/:jobId", requireAgentAuth, (req, res) 
     resticPassword,
     wormEnabled: job.wormEnabled ?? false,
     wormRetentionDays: job.wormRetentionDays ?? 0,
+    sourceType: job.sourceType ?? "local",
+    sourceConfig: (() => {
+      if (!job.sourceConfigEncrypted) return undefined;
+      try { return JSON.parse(decrypt(job.sourceConfigEncrypted)); } catch { return undefined; }
+    })(),
   });
 });
 

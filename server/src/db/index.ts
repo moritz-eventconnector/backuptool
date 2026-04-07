@@ -265,6 +265,14 @@ export async function initDb(): Promise<void> {
     try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
   }
 
+  // Add source type columns to backup_jobs for existing databases.
+  for (const [col, def] of [
+    ["source_type", "TEXT NOT NULL DEFAULT 'local'"],
+    ["source_config_encrypted", "TEXT"],
+  ] as [string, string][]) {
+    try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
+  }
+
   // Add integrity_check_status, locked_until, and worm_locked_until columns to snapshots for existing databases.
   try { sqlite.exec(`ALTER TABLE snapshots ADD COLUMN integrity_check_status TEXT;`); } catch { /* exists */ }
   try { sqlite.exec(`ALTER TABLE snapshots ADD COLUMN locked_until TEXT;`); } catch { /* exists */ }

@@ -224,6 +224,15 @@ export interface Job {
   retryDelaySeconds: number;
   wormEnabled: boolean;
   wormRetentionDays: number;
+  sourceType: "local" | "s3";
+  sourceConfig?: {
+    endpoint?: string;
+    bucket?: string;
+    path?: string;
+    accessKeyId?: string;
+    region?: string;
+    // secretAccessKey is never returned by the server
+  };
   lastVerifiedAt?: string | null;
   lastVerifyStatus?: "passed" | "failed" | null;
   createdAt: string;

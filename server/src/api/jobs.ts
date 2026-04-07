@@ -33,7 +33,7 @@ const retentionSchema = z.object({
 const createJobSchema = z.object({
   agentId: z.string().min(1),
   name: z.string().min(1).max(200),
-  sourcePaths: z.array(z.string().min(1)).min(1),
+  sourcePaths: z.array(z.string().min(1)).default([]),  // was min(1), now optional for s3
   destinationIds: z.array(z.string()).min(1),
   schedule: z.string().optional(), // cron expression
   retention: retentionSchema.optional().default({}),
@@ -46,7 +46,19 @@ const createJobSchema = z.object({
   enabled: z.boolean().default(true),
   wormEnabled: z.boolean().default(false),
   wormRetentionDays: z.number().int().min(0).max(36500).default(0),
-});
+  sourceType: z.enum(["local", "s3"]).default("local"),
+  sourceConfig: z.object({
+    endpoint: z.string().optional(),
+    bucket: z.string(),
+    path: z.string().optional(),
+    accessKeyId: z.string(),
+    secretAccessKey: z.string(),
+    region: z.string().optional(),
+  }).optional(),
+}).refine(
+  (d) => d.sourceType === "s3" ? !!d.sourceConfig?.bucket && !!d.sourceConfig?.accessKeyId : d.sourcePaths.length > 0,
+  { message: "Local jobs require at least one source path; S3 jobs require bucket and accessKeyId" }
+);
 
 // GET /api/jobs
 jobsRouter.get("/", requireAuth, (_req, res) => {
@@ -91,6 +103,10 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
   const resticPassword = randomToken(24);
   const resticPasswordEncrypted = encrypt(resticPassword);
 
+  const sourceConfigEncrypted = parse.data.sourceType === "s3" && parse.data.sourceConfig
+    ? encrypt(JSON.stringify(parse.data.sourceConfig))
+    : null;
+
   // Per-job repo suffix: isolates this job's restic repository within a shared destination bucket.
   // Example: two jobs using "s3:endpoint/bucket" get repos at "s3:endpoint/bucket/jXxYzW" and
   // "s3:endpoint/bucket/kAbCdE" so they never interfere with each other.
@@ -116,6 +132,8 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
     enabled: parse.data.enabled,
     wormEnabled: parse.data.wormEnabled,
     wormRetentionDays: parse.data.wormRetentionDays,
+    sourceType: parse.data.sourceType,
+    sourceConfigEncrypted: sourceConfigEncrypted ?? undefined,
   }).run();
 
   // Push updated job list to agent via WebSocket
@@ -155,6 +173,10 @@ jobsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (req, res)
   if ("enabled" in parse.data) updates.enabled = parse.data.enabled;
   if ("wormEnabled" in parse.data) updates.wormEnabled = parse.data.wormEnabled;
   if ("wormRetentionDays" in parse.data) updates.wormRetentionDays = parse.data.wormRetentionDays;
+  if ("sourceType" in parse.data) updates.sourceType = parse.data.sourceType;
+  if (parse.data.sourceType === "s3" && parse.data.sourceConfig) {
+    updates.sourceConfigEncrypted = encrypt(JSON.stringify(parse.data.sourceConfig));
+  }
 
   db.update(backupJobs)
     .set(updates as Parameters<ReturnType<typeof db.update>["set"]>[0])
@@ -375,7 +397,7 @@ jobsRouter.get("/:id/snapshots", requireAuth, (req, res) => {
 });
 
 function deserializeJob(job: typeof backupJobs.$inferSelect) {
-  const { resticPasswordEncrypted: _pw, resticPasswordPending: _ppw, ...rest } = job;
+  const { resticPasswordEncrypted: _pw, resticPasswordPending: _ppw, sourceConfigEncrypted: _sc, ...rest } = job;
   return {
     ...rest,
     sourcePaths: JSON.parse(job.sourcePaths ?? "[]"),
@@ -383,5 +405,7 @@ function deserializeJob(job: typeof backupJobs.$inferSelect) {
     retention: JSON.parse(job.retention ?? "{}"),
     excludePatterns: JSON.parse(job.excludePatterns ?? "[]"),
     tags: JSON.parse(job.tags ?? "[]"),
+    sourceType: job.sourceType ?? "local",
+    // never expose sourceConfig (credentials) in list/get responses
   };
 }

@@ -30,6 +30,8 @@ type Job struct {
 	// WORM — immutable backup policy
 	WormEnabled       bool            `json:"wormEnabled"`
 	WormRetentionDays int             `json:"wormRetentionDays"`
+	SourceType   string                 `json:"sourceType"`
+	SourceConfig map[string]interface{} `json:"sourceConfig"`
 }
 
 type RetentionPolicy struct {
@@ -85,6 +87,35 @@ func (r *Runner) Run(
 	password string,
 	progressCh chan<- ProgressUpdate,
 ) (*Result, error) {
+	// If source is S3, sync to a temp directory first then back up that directory.
+	if job.SourceType == "s3" {
+		tmpDir, cleanup, err := r.syncS3Source(ctx, job)
+		if err != nil {
+			return &Result{
+				SnapshotID:   snapshotID,
+				Status:       "failed",
+				ErrorMessage: fmt.Sprintf("S3 source sync failed: %v", err),
+			}, nil
+		}
+		defer cleanup()
+		job = &Job{
+			ID:                job.ID,
+			Name:              job.Name,
+			SourcePaths:       []string{tmpDir},
+			DestinationIds:    job.DestinationIds,
+			Schedule:          job.Schedule,
+			Retention:         job.Retention,
+			PreScript:         job.PreScript,
+			PostScript:        job.PostScript,
+			ExcludePatterns:   job.ExcludePatterns,
+			MaxRetries:        job.MaxRetries,
+			RetryDelaySeconds: job.RetryDelaySeconds,
+			WormEnabled:       job.WormEnabled,
+			WormRetentionDays: job.WormRetentionDays,
+			SourceType:        "local", // already synced
+		}
+	}
+
 	repoURL, env, err := r.buildRepoURLAndEnv(dest)
 	if err != nil {
 		return nil, fmt.Errorf("build repo config: %w", err)
@@ -498,6 +529,59 @@ func wormBackendOptions(job *Job, dest *Destination) []string {
 	default:
 		return nil
 	}
+}
+
+// syncS3Source downloads an S3 bucket/prefix to a temporary directory using rclone.
+// Returns the temp directory path and a cleanup function.
+func (r *Runner) syncS3Source(ctx context.Context, job *Job) (string, func(), error) {
+	cfg := job.SourceConfig
+	get := func(key string) string {
+		v, _ := cfg[key].(string)
+		return strings.TrimSpace(v)
+	}
+
+	bucket := get("bucket")
+	if bucket == "" {
+		return "", nil, fmt.Errorf("S3 source: bucket is required")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "backuptool-s3-source-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+
+	// Build rclone args for S3 sync without a config file
+	// Use ":s3:bucket/path" as the remote (on-the-fly backend)
+	srcPath := bucket
+	if p := strings.TrimPrefix(get("path"), "/"); p != "" {
+		srcPath += "/" + p
+	}
+	remote := ":s3:" + srcPath
+
+	args := []string{"sync", remote, tmpDir, "--progress"}
+	if ep := get("endpoint"); ep != "" {
+		args = append(args, "--s3-endpoint="+ep)
+	}
+	if ak := get("accessKeyId"); ak != "" {
+		args = append(args, "--s3-access-key-id="+ak)
+	}
+	if sk := get("secretAccessKey"); sk != "" {
+		args = append(args, "--s3-secret-access-key="+sk)
+	}
+	if region := get("region"); region != "" {
+		args = append(args, "--s3-region="+region)
+	}
+	// Needed for many S3-compatible providers
+	args = append(args, "--s3-provider=Other")
+
+	cmd := exec.CommandContext(ctx, "rclone", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("rclone sync: %v\n%s", err, string(out))
+	}
+	return tmpDir, cleanup, nil
 }
 
 func (r *Runner) applyRetention(ctx context.Context, policy RetentionPolicy, repoURL string, env []string) error {
