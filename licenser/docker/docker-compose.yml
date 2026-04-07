@@ -1,0 +1,34 @@
+version: "3.9"
+
+# Quick start:
+#   1. cp docker/.env.example docker/.env
+#   2. Place your private.pem + public.pem in docker/keys/ (run: licenser keygen)
+#   3. docker compose -f docker/docker-compose.yml up -d
+
+services:
+  licenser:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: licenser:local
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8181}:8181"
+    environment:
+      - "LICENSER_PASSWORD=${LICENSER_PASSWORD}"
+      - "LICENSER_USERNAME=${LICENSER_USERNAME:-admin}"
+    volumes:
+      - licenser-data:/data
+      - ./keys:/keys:ro
+    command:
+      - "serve"
+      - "--data-dir=/data"
+      - "--private-key=/keys/private.pem"
+      - "--public-key=/keys/public.pem"
+      - "--password=${LICENSER_PASSWORD}"
+      - "--username=${LICENSER_USERNAME:-admin}"
+      - "--port=8181"
+
+volumes:
+  licenser-data:
+    driver: local
