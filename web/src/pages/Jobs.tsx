@@ -208,6 +208,13 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
   const [svcFilter, setSvcFilter] = useState<string>("all");
   const [showAllSvcs, setShowAllSvcs] = useState(false);
   const [extraPaths, setExtraPaths] = useState((job?.sourcePaths ?? []).join("\n"));
+  const [sourceType, setSourceType] = useState<"local" | "s3">(job?.sourceType ?? "local");
+  const [s3Endpoint, setS3Endpoint] = useState(job?.sourceConfig?.endpoint ?? "");
+  const [s3Bucket, setS3Bucket] = useState(job?.sourceConfig?.bucket ?? "");
+  const [s3Path, setS3Path] = useState(job?.sourceConfig?.path ?? "");
+  const [s3AccessKey, setS3AccessKey] = useState(job?.sourceConfig?.accessKeyId ?? "");
+  const [s3SecretKey, setS3SecretKey] = useState("");  // never pre-filled for security
+  const [s3Region, setS3Region] = useState(job?.sourceConfig?.region ?? "");
 
   // Combine paths from selected services + manually added paths (deduplicated)
   const combinedPaths = useMemo(() => {
@@ -269,7 +276,20 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
       const effectivePost = selectedSvcs.length > 0 ? combinedPostScript : postScript;
       const data = {
         agentId, name,
-        sourcePaths: job ? extraPaths.split("\n").map((s) => s.trim()).filter(Boolean) : combinedPaths,
+        sourceType,
+        ...(sourceType === "s3" ? {
+          sourcePaths: [],
+          sourceConfig: {
+            endpoint: s3Endpoint || undefined,
+            bucket: s3Bucket,
+            path: s3Path || undefined,
+            accessKeyId: s3AccessKey,
+            ...(s3SecretKey ? { secretAccessKey: s3SecretKey } : (job ? {} : { secretAccessKey: s3SecretKey })),
+            region: s3Region || undefined,
+          },
+        } : {
+          sourcePaths: job ? extraPaths.split("\n").map((s) => s.trim()).filter(Boolean) : combinedPaths,
+        }),
         destinationIds: destIds,
         schedule: schedule || undefined,
         retention: {
@@ -320,7 +340,51 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
               <label>Schedule <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: 12 }}>(leave empty for manual-only)</span></label>
               <CronPicker value={schedule} onChange={setSchedule} />
             </div>
-            {!job && discoveredServices.length > 0 && (
+            <div className="form-group" style={{ gridColumn: "1/-1" }}>
+              <label>Source Type</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["local", "s3"] as const).map((t) => (
+                  <button key={t} type="button"
+                    className={sourceType === t ? "btn-primary" : "btn-ghost"}
+                    style={{ padding: "6px 16px", fontSize: 13 }}
+                    onClick={() => setSourceType(t)}
+                  >
+                    {t === "local" ? "Local paths" : "S3 bucket"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {sourceType === "s3" && (
+              <div style={{ gridColumn: "1/-1", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="form-group" style={{ gridColumn: "1/-1" }}>
+                  <label>Bucket *</label>
+                  <input value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} placeholder="my-bucket" />
+                </div>
+                <div className="form-group">
+                  <label>Access Key ID *</label>
+                  <input value={s3AccessKey} onChange={(e) => setS3AccessKey(e.target.value)} placeholder="AKIAIOSFODNN7..." />
+                </div>
+                <div className="form-group">
+                  <label>Secret Access Key {job ? "(leave blank to keep)" : "*"}</label>
+                  <input type="password" value={s3SecretKey} onChange={(e) => setS3SecretKey(e.target.value)} placeholder="••••••••" />
+                </div>
+                <div className="form-group">
+                  <label>Endpoint (S3-compatible)</label>
+                  <input value={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.value)} placeholder="https://s3.example.com" />
+                </div>
+                <div className="form-group">
+                  <label>Region</label>
+                  <input value={s3Region} onChange={(e) => setS3Region(e.target.value)} placeholder="us-east-1" />
+                </div>
+                <div className="form-group">
+                  <label>Path / Prefix</label>
+                  <input value={s3Path} onChange={(e) => setS3Path(e.target.value)} placeholder="folder/subfolder" />
+                </div>
+              </div>
+            )}
+
+            {sourceType === "local" && !job && discoveredServices.length > 0 && (
               <div style={{ gridColumn: "1/-1" }}>
                 {/* Header + type filter */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
@@ -409,13 +473,15 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
               </div>
             )}
 
-            <div className="form-group" style={{ gridColumn: "1/-1" }}>
-              <label>{selectedSvcs.length > 0 ? "Additional paths (one per line)" : "Source Paths (one per line)"}</label>
-              <textarea value={extraPaths} onChange={(e) => setExtraPaths(e.target.value)}
-                rows={selectedSvcs.length > 0 ? 2 : 3}
-                placeholder="/home/user/data&#10;/var/lib/database"
-                required={selectedSvcs.length === 0 && !extraPaths} />
-            </div>
+            {sourceType === "local" && (
+              <div className="form-group" style={{ gridColumn: "1/-1" }}>
+                <label>{selectedSvcs.length > 0 ? "Additional paths (one per line)" : "Source Paths (one per line)"}</label>
+                <textarea value={extraPaths} onChange={(e) => setExtraPaths(e.target.value)}
+                  rows={selectedSvcs.length > 0 ? 2 : 3}
+                  placeholder="/home/user/data&#10;/var/lib/database"
+                  required={selectedSvcs.length === 0 && !extraPaths} />
+              </div>
+            )}
             <div className="form-group" style={{ gridColumn: "1/-1" }}>
               <label>Destinations</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

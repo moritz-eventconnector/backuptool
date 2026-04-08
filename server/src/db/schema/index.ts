@@ -62,6 +62,8 @@ export const backupJobs = sqliteTable("backup_jobs", {
   // WORM — Write Once Read Many (immutable backups)
   wormEnabled: integer("worm_enabled", { mode: "boolean" }).notNull().default(false),
   wormRetentionDays: integer("worm_retention_days").notNull().default(0), // 0 = no lock
+  sourceType: text("source_type").notNull().default("local"), // "local" | "s3"
+  sourceConfigEncrypted: text("source_config_encrypted"), // encrypted JSON for non-local sources
   maxRetries: integer("max_retries").notNull().default(3),
   retryDelaySeconds: integer("retry_delay_seconds").notNull().default(60),
   tags: text("tags").default("[]"),

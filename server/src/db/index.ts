@@ -265,11 +265,36 @@ export async function initDb(): Promise<void> {
     try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
   }
 
+  // Add source type columns to backup_jobs for existing databases.
+  for (const [col, def] of [
+    ["source_type", "TEXT NOT NULL DEFAULT 'local'"],
+    ["source_config_encrypted", "TEXT"],
+  ] as [string, string][]) {
+    try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
+  }
+
   // Add integrity_check_status, locked_until, and worm_locked_until columns to snapshots for existing databases.
   try { sqlite.exec(`ALTER TABLE snapshots ADD COLUMN integrity_check_status TEXT;`); } catch { /* exists */ }
   try { sqlite.exec(`ALTER TABLE snapshots ADD COLUMN locked_until TEXT;`); } catch { /* exists */ }
   // worm_locked_until: set at creation time when job had WORM enabled — never changes after that
   try { sqlite.exec(`ALTER TABLE snapshots ADD COLUMN worm_locked_until TEXT;`); } catch { /* exists */ }
+
+  // Backfill worm_locked_until for existing snapshots that were created while the job had WORM enabled.
+  // This is a one-time migration — the UPDATE is a no-op for snapshots already having the value set.
+  sqlite.exec(`
+    UPDATE snapshots
+    SET worm_locked_until = datetime(started_at, '+' || (
+        SELECT worm_retention_days FROM backup_jobs WHERE backup_jobs.id = snapshots.job_id
+      ) || ' days')
+    WHERE worm_locked_until IS NULL
+      AND status = 'success'
+      AND EXISTS (
+        SELECT 1 FROM backup_jobs
+        WHERE backup_jobs.id = snapshots.job_id
+          AND backup_jobs.worm_enabled = 1
+          AND backup_jobs.worm_retention_days > 0
+      );
+  `);
 
   // Add webhook columns to notification_settings for existing databases.
   // SQLite does not support "ADD COLUMN IF NOT EXISTS", so we catch the error.

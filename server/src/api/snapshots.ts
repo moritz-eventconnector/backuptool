@@ -190,6 +190,23 @@ snapshotsRouter.delete("/:id", requireAuth, (req, res) => {
     return;
   }
 
+  // Backward-compat: snapshots created before wormLockedUntil was introduced
+  // fall back to checking the current job settings.
+  if (!snap.wormLockedUntil) {
+    const [job] = db.select({ wormEnabled: backupJobs.wormEnabled, wormRetentionDays: backupJobs.wormRetentionDays })
+      .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
+    if (job?.wormEnabled && job.wormRetentionDays > 0) {
+      const unlockMs = new Date(snap.startedAt).getTime() + job.wormRetentionDays * 86_400_000;
+      if (Date.now() < unlockMs) {
+        res.status(423).json({
+          error: "WORM lock active: this snapshot cannot be deleted before the retention period expires",
+          lockedUntil: new Date(unlockMs).toISOString(),
+        });
+        return;
+      }
+    }
+  }
+
   // Per-snapshot lock (set via bulk-lock action)
   if (snap.lockedUntil && new Date(snap.lockedUntil) > new Date()) {
     res.status(423).json({
@@ -233,6 +250,15 @@ snapshotsRouter.post("/bulk-delete", requireAuth, (req, res) => {
     // Check WORM lock (stored on snapshot at creation time — immutable)
     if (snap.wormLockedUntil && new Date(snap.wormLockedUntil) > now) {
       skipped.push(snap.id); continue;
+    }
+    // Backward-compat fallback for snapshots without wormLockedUntil
+    if (!snap.wormLockedUntil) {
+      const [job] = db.select({ wormEnabled: backupJobs.wormEnabled, wormRetentionDays: backupJobs.wormRetentionDays })
+        .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
+      if (job?.wormEnabled && job.wormRetentionDays > 0) {
+        const unlockMs = new Date(snap.startedAt).getTime() + job.wormRetentionDays * 86_400_000;
+        if (Date.now() < unlockMs) { skipped.push(snap.id); continue; }
+      }
     }
     // Check per-snapshot lock
     if (snap.lockedUntil && new Date(snap.lockedUntil) > now) {
