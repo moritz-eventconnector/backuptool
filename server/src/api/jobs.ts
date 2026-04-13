@@ -306,6 +306,8 @@ jobsRouter.post("/:id/verify", requireAuth, requireRole("admin", "operator"), (r
     const [d] = db.select().from(destinations).where(eq(destinations.id, id)).all();
     if (!d) return null;
     const config = JSON.parse(decrypt(d.configEncrypted));
+    // IMPORTANT: inject the per-job repo suffix so the agent uses the correct repo path
+    if (job.resticRepoSuffix) config._repoSuffix = job.resticRepoSuffix;
     return { id: d.id, type: d.type, name: d.name, config };
   }).filter(Boolean);
 
@@ -351,6 +353,8 @@ jobsRouter.post("/:id/rotate-key", requireAuth, requireRole("admin"), (req, res)
     const [d] = db.select().from(destinations).where(eq(destinations.id, id)).all();
     if (!d) return null;
     const config = JSON.parse(decrypt(d.configEncrypted));
+    // IMPORTANT: inject the per-job repo suffix so the agent uses the correct repo path
+    if (job.resticRepoSuffix) config._repoSuffix = job.resticRepoSuffix;
     return { id: d.id, type: d.type, name: d.name, config };
   }).filter(Boolean);
 
