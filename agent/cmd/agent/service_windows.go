@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/exec"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -62,4 +64,23 @@ func runWindowsService(name string, run func(ctx context.Context)) {
 	if err := svc.Run(name, &agentSvc{run: run}); err != nil {
 		log.Fatalf("Windows service failed: %v", err)
 	}
+}
+
+// reExecAgent restarts the Windows service so the newly placed binary is picked up.
+// A detached cmd.exe process waits briefly then issues "sc stop / sc start".
+// The current process exits immediately after launching the helper.
+func reExecAgent(_ string) {
+	const svcName = "BackupToolAgent"
+	// Spawn a detached cmd.exe that waits ~2 s, restarts the service, then exits.
+	script := "ping 127.0.0.1 -n 3 >nul & sc stop " + svcName + " & sc start " + svcName
+	cmd := exec.Command("cmd", "/c", script)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		log.Printf("Self-update: could not launch restart helper: %v — restart the service manually", err)
+	}
+	// Detach: release our reference so cmd.exe outlives this process.
+	cmd.Process.Release()
+	// Exit this process — SCM will see the service as stopped.
+	os.Exit(0)
 }
