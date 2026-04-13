@@ -122,14 +122,25 @@ func main() {
 		return
 	}
 
-	// ── Cron scheduler ───────────────────────────────────────────────────────
+	// ── Start agent (Windows service or normal process) ──────────────────────
+	if isWindowsService() {
+		runWindowsService("BackupToolAgent", func(ctx context.Context) {
+			runAgent(ctx, srv, cfg)
+		})
+		return
+	}
+
+	// Normal process start (Linux systemd, macOS launchd, or direct CLI)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	runAgent(ctx, srv, cfg)
+}
+
+// runAgent runs the persistent agent loop until ctx is cancelled.
+func runAgent(ctx context.Context, srv *client.ServerClient, cfg *config.Config) {
 	scheduler := cron.New(cron.WithSeconds())
 	scheduler.Start()
 	defer scheduler.Stop()
-
-	// ── Main agent loop ───────────────────────────────────────────────────────
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
 	log.Printf("BackupTool Agent v%s started | server: %s | agent: %s", version, cfg.ServerURL, cfg.AgentID)
 

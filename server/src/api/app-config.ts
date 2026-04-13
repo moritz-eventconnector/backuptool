@@ -4,6 +4,7 @@ import { getDb } from "../db/index.js";
 import { appConfig } from "../db/schema/index.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { logger } from "../logger.js";
+import { invalidateAllowlistCache } from "../middleware/ipAllowlist.js";
 
 export const appConfigRouter = Router();
 
@@ -11,13 +12,10 @@ export const appConfigRouter = Router();
 appConfigRouter.get("/app-config", requireAuth, (_req, res) => {
   const db = getDb();
   const [row] = db.select().from(appConfig).all();
-  res.json(row ?? {
-    serverName: "BackupTool",
-    serverUrl: null,
-    setupCompleted: false,
-    releasesBaseUrl: null,
-    resticBin: "restic",
-    rcloneBin: "rclone",
+  const base = row ?? { serverName: "BackupTool", serverUrl: null, setupCompleted: false, releasesBaseUrl: null, resticBin: "restic", rcloneBin: "rclone", uiAllowlist: "[]" };
+  res.json({
+    ...base,
+    uiAllowlist: JSON.parse((base.uiAllowlist as string | null) ?? "[]") as string[],
   });
 });
 
@@ -35,6 +33,7 @@ const appConfigSchema = z.object({
   releasesBaseUrl: z.string().url().or(z.literal("")).optional(),
   resticBin: z.string().min(1).optional(),
   rcloneBin: z.string().min(1).optional(),
+  uiAllowlist: z.array(z.string()).optional(),
 });
 
 // PUT /api/settings/app-config
@@ -50,14 +49,18 @@ appConfigRouter.put("/app-config", requireAuth, requireRole("admin"), (req, res)
     ...parse.data,
     serverUrl: parse.data.serverUrl || null,
     releasesBaseUrl: parse.data.releasesBaseUrl || null,
+    uiAllowlist: parse.data.uiAllowlist !== undefined ? JSON.stringify(parse.data.uiAllowlist) : undefined,
     updatedAt: new Date().toISOString(),
   };
+  // Remove undefined keys so onConflictDoUpdate only touches provided fields
+  Object.keys(values).forEach((k) => values[k] === undefined && delete values[k]);
 
   db.insert(appConfig)
     .values({ id: "singleton", ...values } as typeof appConfig.$inferInsert)
     .onConflictDoUpdate({ target: appConfig.id, set: values as Partial<typeof appConfig.$inferInsert> })
     .run();
 
+  invalidateAllowlistCache();
   logger.info("App config updated");
   res.json({ message: "Saved" });
 });
