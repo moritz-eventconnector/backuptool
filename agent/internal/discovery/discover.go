@@ -166,16 +166,21 @@ influx backup /tmp/backuptool-influx-backup 2>/dev/null || true`,
 	// ── Docker ───────────────────────────────────────────────────────────────
 
 	if hasBin("docker") && dirExists("/var/lib/docker") {
+		dockerPaths := existingPaths("/var/lib/docker/volumes")
+		// Docker Swarm stores secrets, configs and raft state here — back it up too.
+		if dirExists("/var/lib/docker/swarm") {
+			dockerPaths = append(dockerPaths, "/var/lib/docker/swarm")
+		}
 		services = append(services, DiscoveredService{
-			Name:        "Docker",
+			Name:        "Docker Volumes",
 			Type:        "docker",
-			SourcePaths: []string{"/var/lib/docker"},
+			SourcePaths: dockerPaths,
 			PreScript: `#!/usr/bin/env bash
-# Stop all running containers for consistent backup.
+# Stop all running containers for consistent volume backup.
 # Comment this out if you prefer a live (fuzzy) backup.
 docker stop $(docker ps -q) 2>/dev/null || true`,
 			PostScript: `docker start $(docker ps -aq) 2>/dev/null || true`,
-			Note:       "Full Docker data directory: volumes, containers, images and configs. Containers are stopped during backup for consistency.",
+			Note:       "Named Docker volumes (persistent data). Image layers and container state are excluded — they can be re-pulled/recreated from your compose files.",
 			Priority:   "critical",
 		})
 
