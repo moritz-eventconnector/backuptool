@@ -816,23 +816,36 @@ func selfUpdate(srv *client.ServerClient) bool {
 		return false
 	}
 
-	// Atomically replace the current binary.
+	// Replace the current binary.
+	// On Windows the running .exe is locked, so we first rename it away to a
+	// .old path (which Windows allows even for running executables), then move
+	// the new binary into place. The .old file is left on disk — Windows won't
+	// let us delete it while the process is still running.
+	if runtime.GOOS == "windows" {
+		oldPath := execPath + ".old"
+		os.Remove(oldPath) // clean up any previous .old, best-effort
+		if err := os.Rename(execPath, oldPath); err != nil {
+			log.Printf("Self-update: could not rename current binary: %v", err)
+			os.Remove(tmpPath)
+			return false
+		}
+	}
+
 	if err := os.Rename(tmpPath, execPath); err != nil {
 		log.Printf("Self-update: rename failed: %v", err)
 		os.Remove(tmpPath)
+		if runtime.GOOS == "windows" {
+			os.Rename(execPath+".old", execPath) // restore on failure
+		}
 		return false
 	}
 
-	log.Printf("Self-update: binary replaced — re-executing…")
+	log.Printf("Self-update: binary replaced — restarting…")
 
-	// Re-exec the new binary with the same arguments.
-	args := os.Args
-	env := os.Environ()
-	if err := syscall.Exec(execPath, args, env); err != nil {
-		log.Printf("Self-update: re-exec failed: %v — continuing with old binary", err)
-		return false
-	}
-	return true // unreachable on success, but satisfies the compiler
+	// Re-exec with the new binary. On Unix this is an in-process exec (no new
+	// PID). On Windows we restart the SCM service instead.
+	reExecAgent(execPath)
+	return true
 }
 
 // sha256File computes the SHA-256 hex digest of the file at path.
