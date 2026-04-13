@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, HardDrive, Pencil, RefreshCw } from "lucide-react";
+import { Plus, Trash2, HardDrive, Pencil, RefreshCw, CheckCircle, XCircle, Wifi } from "lucide-react";
 
 const DESTINATION_TYPES = [
   { value: "s3",     label: "Amazon S3 / S3-Compatible" },
@@ -85,6 +85,8 @@ export default function Destinations() {
   const [loadingEdit, setLoadingEdit] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const isEditing = !!form.id;
 
@@ -108,12 +110,14 @@ export default function Destinations() {
   const openAdd = () => {
     setForm(EMPTY_FORM);
     setError("");
+    setTestResult(null);
     setShowForm(true);
   };
 
   const openEdit = async (id: string) => {
     setLoadingEdit(true);
     setError("");
+    setTestResult(null);
     setShowForm(true);
     try {
       const dest = await api.getDestination(id);
@@ -126,12 +130,26 @@ export default function Destinations() {
     }
   };
 
+  const handleTest = async () => {
+    setTestResult(null);
+    setTesting(true);
+    try {
+      const result = await api.testDestination(form.type, form.fields);
+      setTestResult(result);
+    } catch (e: unknown) {
+      setTestResult({ ok: false, message: e instanceof Error ? e.message : "Test failed" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const handleTypeChange = (newType: string) => {
     const defaults: Record<string, string> = {};
     for (const f of CONFIG_FIELDS[newType] ?? []) {
       if (f.defaultValue) defaults[f.key] = f.defaultValue;
     }
     setForm((prev) => ({ ...prev, type: newType, fields: defaults }));
+    setTestResult(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -274,6 +292,34 @@ export default function Destinations() {
                 <div className="alert alert-info" style={{ fontSize: 12 }}>
                   Credentials are encrypted with AES-256-GCM before storage.
                 </div>
+
+                {/* Connection test */}
+                <div style={{ marginBottom: 16 }}>
+                  <button type="button" className="btn-ghost"
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center", border: "1px solid var(--border)" }}
+                    disabled={testing}
+                    onClick={handleTest}>
+                    {testing
+                      ? <><span className="spinner" style={{ width: 13, height: 13 }} />Testing…</>
+                      : <><Wifi size={14} />Test Connection</>}
+                  </button>
+                  {testResult && (
+                    <div style={{
+                      marginTop: 8, padding: "8px 12px", borderRadius: "var(--radius)",
+                      background: testResult.ok ? "rgba(34,197,94,.1)" : "rgba(239,68,68,.1)",
+                      border: `1px solid ${testResult.ok ? "rgba(34,197,94,.3)" : "rgba(239,68,68,.3)"}`,
+                      display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13,
+                    }}>
+                      {testResult.ok
+                        ? <CheckCircle size={15} color="var(--success, #22c55e)" style={{ flexShrink: 0, marginTop: 1 }} />
+                        : <XCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />}
+                      <span style={{ color: testResult.ok ? "var(--success, #22c55e)" : "var(--danger)" }}>
+                        {testResult.message}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="modal-footer">
                   <button type="button" className="btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
                   <button type="submit" className="btn-primary" disabled={saving}>

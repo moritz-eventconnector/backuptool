@@ -108,6 +108,8 @@ export const api = {
     request<Destination>("/destinations", { method: "POST", body: JSON.stringify(data) }),
   updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown> }) =>
     request(`/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  testDestination: (type: string, config: Record<string, unknown>) =>
+    request<{ ok: boolean; message: string }>("/destinations/test", { method: "POST", body: JSON.stringify({ type, config }) }),
   deleteDestination: (id: string) => request(`/destinations/${id}`, { method: "DELETE" }),
   resetDestinationRepo: (id: string) => request<{ message: string; newPath: string }>(`/destinations/${id}/reset-repo`, { method: "POST" }),
 
