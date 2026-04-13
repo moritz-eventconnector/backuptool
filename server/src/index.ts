@@ -96,16 +96,11 @@ async function main() {
   app.set("trust proxy", 1);
 
   // ── IP Allowlist (checked before every route) ─────────────────────────────
-  // Skipped for auth/setup routes so admins can still log in and fix the list.
+  // Only the agent internal API (token-authenticated, not browser-based) is
+  // exempt so agents can still reach the server regardless of the allowlist.
+  // Everything else — including login — is blocked for non-allowed IPs.
   app.use((req, res, next) => {
-    // Always allow: login, setup-required check, agent internal API (token-authenticated)
-    if (
-      req.path.startsWith("/api/auth/") ||
-      req.path.startsWith("/api/internal/") ||
-      req.path === "/api/settings/setup-status"
-    ) {
-      next(); return;
-    }
+    if (req.path.startsWith("/api/internal/")) { next(); return; }
     ipAllowlistMiddleware(req, res, next);
   });
 
