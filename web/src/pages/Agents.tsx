@@ -1,7 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Server, Copy, CheckCircle, XCircle, Terminal, RefreshCw, AlertTriangle } from "lucide-react";
 import { useWsEvent } from "../context/WebSocketContext.tsx";
 
 type OsTab = "linux" | "windows" | "manual";
@@ -9,6 +9,29 @@ type OsTab = "linux" | "windows" | "manual";
 export default function Agents() {
   const qc = useQueryClient();
   const { data: agents = [], isLoading } = useQuery({ queryKey: ["agents"], queryFn: api.listAgents });
+  const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
+  const { data: snapshots = [] } = useQuery({ queryKey: ["snapshots"], queryFn: () => api.listSnapshots(200) });
+
+  // Per-agent warning state
+  const agentWarnings = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const a of agents) {
+      const agentJobs = jobs.filter((j: { agentId: string }) => j.agentId === a.id);
+      const warnings: string[] = [];
+      if (agentJobs.length === 0) {
+        warnings.push("No backup jobs configured");
+      } else {
+        const hasSchedule = agentJobs.some((j: { schedule?: string }) => !!j.schedule);
+        if (!hasSchedule) warnings.push("No scheduled backups — all jobs are manual only");
+        const hasSuccess = snapshots.some(
+          (s: { agentId: string; status: string }) => s.agentId === a.id && s.status === "success"
+        );
+        if (!hasSuccess) warnings.push("No successful backup yet");
+      }
+      map[a.id] = warnings;
+    }
+    return map;
+  }, [agents, jobs, snapshots]);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [addResult, setAddResult] = useState<{ agentId: string; registrationToken: string } | null>(null);
@@ -109,7 +132,7 @@ export default function Agents() {
         <div className="card">
           <table>
             <thead>
-              <tr><th>Name</th><th>Hostname</th><th>Platform</th><th>Status</th><th>Last Seen</th><th>Version</th><th></th></tr>
+              <tr><th>Name</th><th>Hostname</th><th>Platform</th><th>Status</th><th>Last Seen</th><th>Version</th><th>Warnings</th><th></th></tr>
             </thead>
             <tbody>
               {agents.map((a) => (
@@ -125,6 +148,13 @@ export default function Agents() {
                   </td>
                   <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.lastSeen ? new Date(a.lastSeen).toLocaleString() : "Never"}</td>
                   <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{a.version}</td>
+                  <td>
+                    {(agentWarnings[a.id] ?? []).map((w) => (
+                      <div key={w} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#f59e0b", whiteSpace: "nowrap" }}>
+                        <AlertTriangle size={11} /> {w}
+                      </div>
+                    ))}
+                  </td>
                   <td>
                     <div style={{ display: "flex", gap: 4, alignItems: "center", justifyContent: "flex-end" }}>
                       {updateMsg[a.id]?.text && (

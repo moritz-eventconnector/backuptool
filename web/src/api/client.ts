@@ -29,7 +29,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(res.status, err.error || "Request failed");
+    const message = err.error || "Request failed";
+    // Show a sticky license toast for payment-required responses
+    if (res.status === 402) {
+      import("../context/NotificationContext.tsx").then(({ notify }) => {
+        notify({ kind: "warning", title: "License restriction", message, duration: 0 });
+      });
+    }
+    throw new ApiError(res.status, message);
   }
 
   if (res.status === 204) return null as T;

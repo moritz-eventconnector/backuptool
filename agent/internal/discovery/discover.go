@@ -167,15 +167,15 @@ influx backup /tmp/backuptool-influx-backup 2>/dev/null || true`,
 
 	if hasBin("docker") && dirExists("/var/lib/docker") {
 		services = append(services, DiscoveredService{
-			Name:        "Docker Volumes",
+			Name:        "Docker",
 			Type:        "docker",
-			SourcePaths: []string{"/var/lib/docker/volumes"},
+			SourcePaths: []string{"/var/lib/docker"},
 			PreScript: `#!/usr/bin/env bash
-# Stop all running containers for consistent volume backup.
+# Stop all running containers for consistent backup.
 # Comment this out if you prefer a live (fuzzy) backup.
 docker stop $(docker ps -q) 2>/dev/null || true`,
 			PostScript: `docker start $(docker ps -aq) 2>/dev/null || true`,
-			Note:       "Backs up all named Docker volumes. Containers are stopped during backup for consistency.",
+			Note:       "Full Docker data directory: volumes, containers, images and configs. Containers are stopped during backup for consistency.",
 			Priority:   "critical",
 		})
 
@@ -300,16 +300,6 @@ mysqldump -u"$USER" -p"$PASS" "$DB" > %s/wp-database-dump.sql 2>/dev/null || tru
 			Name:        "Mattermost",
 			Type:        "app",
 			SourcePaths: existingPaths("/var/lib/mattermost", "/opt/mattermost/data", "/etc/mattermost"),
-			Priority:    "critical",
-		})
-	}
-
-	// Keycloak
-	if dirExists("/opt/keycloak") || hasProc(procs, "keycloak") {
-		services = append(services, DiscoveredService{
-			Name:        "Keycloak",
-			Type:        "app",
-			SourcePaths: existingPaths("/opt/keycloak/data", "/var/lib/keycloak"),
 			Priority:    "critical",
 		})
 	}
@@ -708,8 +698,11 @@ pg_dump -U synapse synapse > /tmp/backuptool-synapse-db.sql 2>/dev/null || true`
 			Name:        "Mailcow",
 			Type:        "mail",
 			SourcePaths: existingPaths("/opt/mailcow-dockerized"),
-			Note:        "Includes docker-compose.yml, .env and all mail data.",
-			Priority:    "critical",
+			PreScript: `#!/usr/bin/env bash
+cd /opt/mailcow-dockerized
+./helper-scripts/backup_and_restore.sh backup all 2>/dev/null || true`,
+			Note:     "Uses official mailcow backup script. Includes docker-compose.yml, .env and all mail data.",
+			Priority: "critical",
 		})
 	}
 
@@ -928,6 +921,379 @@ slapcat -n 1 > /tmp/backuptool-ldap.ldif 2>/dev/null || true`,
 		})
 	}
 
+	// ── Home Automation ────────────────────────────────────────────────────────
+
+	// Home Assistant
+	haPaths := existingPaths("/etc/homeassistant", "/home/homeassistant/.homeassistant", "/var/lib/hass", "/config")
+	if len(haPaths) == 0 {
+		// Docker installs often put config in /config or a bind mount
+		haPaths = existingPaths("/opt/homeassistant", "/srv/homeassistant")
+	}
+	if len(haPaths) > 0 && (hasProc(procs, "hass") || hasProc(procs, "home-assistant") || dirExists("/etc/homeassistant") || dirExists("/home/homeassistant/.homeassistant")) {
+		services = append(services, DiscoveredService{
+			Name:        "Home Assistant",
+			Type:        "app",
+			SourcePaths: haPaths,
+			Note:        "Configuration, automations, history database and custom components.",
+			Priority:    "critical",
+		})
+	}
+
+	// Frigate NVR
+	if dirExists("/config/frigate") || dirExists("/etc/frigate") || dirExists("/opt/frigate") {
+		services = append(services, DiscoveredService{
+			Name:        "Frigate NVR",
+			Type:        "app",
+			SourcePaths: existingPaths("/config/frigate", "/etc/frigate", "/opt/frigate"),
+			Note:        "Config and clip database. Recordings (media) are typically stored separately.",
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Document / Photo Management ───────────────────────────────────────────
+
+	// Paperless-ngx
+	if dirExists("/opt/paperless-ngx") || dirExists("/var/lib/paperless-ngx") || dirExists("/usr/src/paperless") {
+		paperlessData := firstExisting("/opt/paperless-ngx/media", "/var/lib/paperless-ngx", "/usr/src/paperless/media")
+		services = append(services, DiscoveredService{
+			Name:        "Paperless-ngx",
+			Type:        "app",
+			SourcePaths: existingPaths(paperlessData, "/opt/paperless-ngx/data", "/var/lib/paperless-ngx"),
+			PreScript: `#!/usr/bin/env bash
+# Export Paperless-ngx database
+cd /opt/paperless-ngx 2>/dev/null || cd /usr/src/paperless 2>/dev/null || true
+python3 manage.py document_exporter /tmp/backuptool-paperless-export 2>/dev/null || true`,
+			PostScript: `rm -rf /tmp/backuptool-paperless-export`,
+			Note:       "Documents, thumbnails, archive and database. All scanned documents.",
+			Priority:   "critical",
+		})
+	}
+
+	// Immich
+	if dirExists("/var/lib/immich") || dirExists("/opt/immich") || dirExists("/mnt/immich") {
+		immichPath := firstExisting("/var/lib/immich", "/opt/immich/upload", "/mnt/immich")
+		services = append(services, DiscoveredService{
+			Name:        "Immich",
+			Type:        "app",
+			SourcePaths: existingPaths(immichPath, "/opt/immich/data"),
+			PreScript: `#!/usr/bin/env bash
+# Dump Immich PostgreSQL database
+pg_dump -U immich immich > /tmp/backuptool-immich-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-immich-db.sql`,
+			Note:       "Photos, videos and database. The upload library can be very large.",
+			Priority:   "critical",
+		})
+	}
+
+	// Photoprism
+	if dirExists("/var/lib/photoprism") || dirExists("/opt/photoprism") || dirExists("/photoprism") {
+		ppPath := firstExisting("/var/lib/photoprism", "/opt/photoprism/storage", "/photoprism/storage")
+		services = append(services, DiscoveredService{
+			Name:        "PhotoPrism",
+			Type:        "app",
+			SourcePaths: existingPaths(ppPath, "/photoprism/originals"),
+			Note:        "Storage (sidecar, cache, config) and originals library.",
+			Priority:    "critical",
+		})
+	}
+
+	// ── Knowledge Bases / Wikis ───────────────────────────────────────────────
+
+	// BookStack
+	if dirExists("/var/www/bookstack") || dirExists("/opt/bookstack") {
+		bsRoot := firstExisting("/var/www/bookstack", "/opt/bookstack")
+		services = append(services, DiscoveredService{
+			Name:        "BookStack",
+			Type:        "app",
+			SourcePaths: existingPaths(bsRoot+"/public/uploads", bsRoot+"/storage"),
+			PreScript: fmt.Sprintf(`#!/usr/bin/env bash
+DB=$(grep "^DB_DATABASE" %s/.env 2>/dev/null | cut -d= -f2)
+USER=$(grep "^DB_USERNAME" %s/.env 2>/dev/null | cut -d= -f2)
+PASS=$(grep "^DB_PASSWORD" %s/.env 2>/dev/null | cut -d= -f2)
+mysqldump -u"$USER" -p"$PASS" "$DB" > /tmp/backuptool-bookstack-db.sql 2>/dev/null || true`, bsRoot, bsRoot, bsRoot),
+			PostScript: `rm -f /tmp/backuptool-bookstack-db.sql`,
+			Note:       "Uploads, attachments and database dump.",
+			Priority:   "critical",
+		})
+	}
+
+	// Wiki.js
+	if dirExists("/var/lib/wikijs") || dirExists("/opt/wiki") || dirExists("/wiki") {
+		wikiPath := firstExisting("/var/lib/wikijs", "/opt/wiki", "/wiki")
+		services = append(services, DiscoveredService{
+			Name:        "Wiki.js",
+			Type:        "app",
+			SourcePaths: existingPaths(wikiPath),
+			Priority:    "critical",
+		})
+	}
+
+	// Outline (wiki)
+	if dirExists("/var/lib/outline") || dirExists("/opt/outline") {
+		services = append(services, DiscoveredService{
+			Name:        "Outline",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/outline", "/opt/outline"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Blogs / CMS ───────────────────────────────────────────────────────────
+
+	// Ghost
+	if dirExists("/var/lib/ghost") || dirExists("/opt/ghost") {
+		ghostPath := firstExisting("/var/lib/ghost/content", "/opt/ghost/content")
+		services = append(services, DiscoveredService{
+			Name:        "Ghost",
+			Type:        "app",
+			SourcePaths: existingPaths(ghostPath, "/var/lib/ghost", "/opt/ghost"),
+			Note:        "Content directory including images, themes and SQLite database.",
+			Priority:    "critical",
+		})
+	}
+
+	// Strapi
+	if dirExists("/opt/strapi") || (hasProc(procs, "strapi") && dirExists("/srv/strapi")) {
+		strapiPath := firstExisting("/opt/strapi", "/srv/strapi")
+		services = append(services, DiscoveredService{
+			Name:        "Strapi",
+			Type:        "app",
+			SourcePaths: existingPaths(strapiPath+"/public/uploads", strapiPath),
+			Priority:    "critical",
+		})
+	}
+
+	// Directus
+	if dirExists("/opt/directus") || dirExists("/var/lib/directus") {
+		services = append(services, DiscoveredService{
+			Name:        "Directus",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/directus/uploads", "/var/lib/directus"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Project Management / CRM ──────────────────────────────────────────────
+
+	// Vikunja (task manager)
+	if dirExists("/var/lib/vikunja") || dirExists("/opt/vikunja") || hasProc(procs, "vikunja") {
+		services = append(services, DiscoveredService{
+			Name:        "Vikunja",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/vikunja", "/opt/vikunja"),
+			Priority:    "critical",
+		})
+	}
+
+	// Monica (personal CRM)
+	if dirExists("/var/www/monica") || dirExists("/opt/monica") {
+		monicaRoot := firstExisting("/var/www/monica", "/opt/monica")
+		services = append(services, DiscoveredService{
+			Name:        "Monica (CRM)",
+			Type:        "app",
+			SourcePaths: existingPaths(monicaRoot+"/storage"),
+			PreScript: fmt.Sprintf(`#!/usr/bin/env bash
+DB=$(grep "^DB_DATABASE" %s/.env 2>/dev/null | cut -d= -f2)
+USER=$(grep "^DB_USERNAME" %s/.env 2>/dev/null | cut -d= -f2)
+PASS=$(grep "^DB_PASSWORD" %s/.env 2>/dev/null | cut -d= -f2)
+mysqldump -u"$USER" -p"$PASS" "$DB" > /tmp/backuptool-monica-db.sql 2>/dev/null || true`, monicaRoot, monicaRoot, monicaRoot),
+			PostScript: `rm -f /tmp/backuptool-monica-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Plane (project management)
+	if dirExists("/opt/plane") {
+		services = append(services, DiscoveredService{
+			Name:        "Plane",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/plane"),
+			Priority:    "critical",
+		})
+	}
+
+	// Redmine
+	if dirExists("/var/lib/redmine") || dirExists("/opt/redmine") || dirExists("/usr/share/redmine") {
+		rmPath := firstExisting("/var/lib/redmine", "/opt/redmine", "/usr/share/redmine")
+		services = append(services, DiscoveredService{
+			Name:        "Redmine",
+			Type:        "app",
+			SourcePaths: existingPaths(rmPath+"/files", rmPath),
+			PreScript: `#!/usr/bin/env bash
+# Dump Redmine database (usually MySQL or PostgreSQL)
+mysqldump --single-transaction redmine > /tmp/backuptool-redmine-db.sql 2>/dev/null \
+  || pg_dump -U redmine redmine > /tmp/backuptool-redmine-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-redmine-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// GLPI (IT asset management)
+	if dirExists("/var/www/glpi") || dirExists("/opt/glpi") {
+		glpiRoot := firstExisting("/var/www/glpi", "/opt/glpi")
+		services = append(services, DiscoveredService{
+			Name:        "GLPI",
+			Type:        "app",
+			SourcePaths: existingPaths(glpiRoot+"/files", glpiRoot+"/config"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction glpi > /tmp/backuptool-glpi-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-glpi-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// ── Finance / Business ────────────────────────────────────────────────────
+
+	// Invoice Ninja
+	if dirExists("/var/www/invoiceninja") || dirExists("/opt/invoiceninja") {
+		inRoot := firstExisting("/var/www/invoiceninja", "/opt/invoiceninja")
+		services = append(services, DiscoveredService{
+			Name:        "Invoice Ninja",
+			Type:        "app",
+			SourcePaths: existingPaths(inRoot+"/storage", inRoot),
+			PreScript: fmt.Sprintf(`#!/usr/bin/env bash
+DB=$(grep "^DB_DATABASE" %s/.env 2>/dev/null | cut -d= -f2)
+USER=$(grep "^DB_USERNAME" %s/.env 2>/dev/null | cut -d= -f2)
+PASS=$(grep "^DB_PASSWORD" %s/.env 2>/dev/null | cut -d= -f2)
+mysqldump -u"$USER" -p"$PASS" "$DB" > /tmp/backuptool-invoiceninja-db.sql 2>/dev/null || true`, inRoot, inRoot, inRoot),
+			PostScript: `rm -f /tmp/backuptool-invoiceninja-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Snipe-IT (asset management)
+	if dirExists("/var/www/snipe-it") || dirExists("/opt/snipe-it") {
+		siRoot := firstExisting("/var/www/snipe-it", "/opt/snipe-it")
+		services = append(services, DiscoveredService{
+			Name:        "Snipe-IT",
+			Type:        "app",
+			SourcePaths: existingPaths(siRoot+"/storage/app", siRoot+"/storage"),
+			PreScript: fmt.Sprintf(`#!/usr/bin/env bash
+DB=$(grep "^DB_DATABASE" %s/.env 2>/dev/null | cut -d= -f2)
+USER=$(grep "^DB_USERNAME" %s/.env 2>/dev/null | cut -d= -f2)
+PASS=$(grep "^DB_PASSWORD" %s/.env 2>/dev/null | cut -d= -f2)
+mysqldump -u"$USER" -p"$PASS" "$DB" > /tmp/backuptool-snipeit-db.sql 2>/dev/null || true`, siRoot, siRoot, siRoot),
+			PostScript: `rm -f /tmp/backuptool-snipeit-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// ── Dev tools / Code Hosting ──────────────────────────────────────────────
+
+	// Forgejo (Gitea fork)
+	if dirExists("/var/lib/forgejo") || dirExists("/opt/forgejo") || hasProc(procs, "forgejo") {
+		forgejoPth := firstExisting("/var/lib/forgejo", "/opt/forgejo")
+		services = append(services, DiscoveredService{
+			Name:        "Forgejo",
+			Type:        "app",
+			SourcePaths: existingPaths(forgejoPth, "/etc/forgejo"),
+			PreScript: `#!/usr/bin/env bash
+forgejo dump -c /etc/forgejo/app.ini --tempdir /tmp/backuptool-forgejo-dump 2>/dev/null || true`,
+			PostScript: `rm -rf /tmp/backuptool-forgejo-dump`,
+			Priority:   "critical",
+		})
+	}
+
+	// Weblate (translation platform)
+	if dirExists("/var/lib/weblate") || dirExists("/opt/weblate") || hasProc(procs, "weblate") {
+		services = append(services, DiscoveredService{
+			Name:        "Weblate",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/weblate", "/opt/weblate/data"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U weblate weblate > /tmp/backuptool-weblate-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-weblate-db.sql`,
+			Priority:   "recommended",
+		})
+	}
+
+	// Headscale (self-hosted Tailscale)
+	if hasProc(procs, "headscale") || dirExists("/var/lib/headscale") || dirExists("/etc/headscale") {
+		services = append(services, DiscoveredService{
+			Name:        "Headscale",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/headscale", "/etc/headscale"),
+			Note:        "Database and private keys. Losing these breaks the mesh network.",
+			Priority:    "critical",
+		})
+	}
+
+	// Netdata
+	if hasProc(procs, "netdata") || dirExists("/var/lib/netdata") {
+		services = append(services, DiscoveredService{
+			Name:        "Netdata",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/netdata", "/etc/netdata"),
+			Priority:    "optional",
+		})
+	}
+
+	// Plausible Analytics
+	if dirExists("/opt/plausible") || dirExists("/var/lib/plausible") {
+		services = append(services, DiscoveredService{
+			Name:        "Plausible Analytics",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/plausible", "/var/lib/plausible"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U plausible plausible > /tmp/backuptool-plausible-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-plausible-db.sql`,
+			Priority:   "recommended",
+		})
+	}
+
+	// OwnCloud Infinite Scale (OCIS)
+	if dirExists("/var/lib/ocis") || dirExists("/etc/ocis") || hasProc(procs, "ocis") {
+		services = append(services, DiscoveredService{
+			Name:        "ownCloud Infinite Scale (OCIS)",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/ocis", "/etc/ocis"),
+			Note:        "All user files and metadata stored in the OCIS data directory.",
+			Priority:    "critical",
+		})
+	}
+
+	// Mealie (recipe manager)
+	if dirExists("/app/data") && dirExists("/app/data/recipes") {
+		services = append(services, DiscoveredService{
+			Name:        "Mealie",
+			Type:        "app",
+			SourcePaths: []string{"/app/data"},
+			Note:        "Recipes, meal plans, shopping lists and backups.",
+			Priority:    "recommended",
+		})
+	}
+	if d := firstExisting("/opt/mealie", "/var/lib/mealie"); d != "" {
+		services = append(services, DiscoveredService{
+			Name:        "Mealie",
+			Type:        "app",
+			SourcePaths: []string{d},
+			Priority:    "recommended",
+		})
+	}
+
+	// Zitadel (identity provider)
+	if dirExists("/var/lib/zitadel") || hasProc(procs, "zitadel") {
+		services = append(services, DiscoveredService{
+			Name:        "Zitadel",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/zitadel", "/etc/zitadel"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U zitadel zitadel > /tmp/backuptool-zitadel-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-zitadel-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Grist (spreadsheet / database hybrid)
+	if dirExists("/opt/grist") || dirExists("/persist/grist") {
+		services = append(services, DiscoveredService{
+			Name:        "Grist",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/grist", "/persist/grist"),
+			Priority:    "critical",
+		})
+	}
+
 	// ── Media servers ─────────────────────────────────────────────────────────
 
 	// Plex
@@ -989,16 +1355,6 @@ pg_dump -U netbox netbox > /tmp/backuptool-netbox-db.sql 2>/dev/null || true`,
 				Priority:    "recommended",
 			})
 		}
-	}
-
-	// Plane (project management)
-	if dirExists("/opt/plane") {
-		services = append(services, DiscoveredService{
-			Name:        "Plane",
-			Type:        "app",
-			SourcePaths: existingPaths("/opt/plane"),
-			Priority:    "critical",
-		})
 	}
 
 	// ── Infrastructure tools ──────────────────────────────────────────────────
@@ -1079,6 +1435,11 @@ pg_dump -U netbox netbox > /tmp/backuptool-netbox-db.sql 2>/dev/null || true`,
 	// These are always backed up regardless of what other services are found.
 
 	services = append(services, unixSafetyNet()...)
+
+	// ── Large directory scan ──────────────────────────────────────────────────
+	// Find big directories that aren't already covered by a specific service.
+
+	services = append(services, largeDirectoryScan(services)...)
 
 	return services
 }
@@ -1224,6 +1585,85 @@ func scanWindows() []DiscoveredService {
 	})
 
 	return services
+}
+
+// largeDirectoryScan uses `du` to find directories that are larger than 500 MB
+// under common roots (/var, /opt, /home, /srv, /app, /data, /mnt) and returns
+// them as "optional" backup targets — but only if they are not already covered
+// by paths from the known-service scan.
+func largeDirectoryScan(known []DiscoveredService) []DiscoveredService {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	// Build a set of path prefixes already covered by known services.
+	covered := map[string]struct{}{}
+	for _, svc := range known {
+		for _, p := range svc.SourcePaths {
+			covered[filepath.Clean(p)] = struct{}{}
+		}
+	}
+
+	isCovered := func(p string) bool {
+		clean := filepath.Clean(p)
+		// Check if the path itself or any parent is already covered.
+		for cp := range covered {
+			if clean == cp || strings.HasPrefix(clean, cp+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Scan roots with du --max-depth=1 to get direct child sizes in KB.
+	roots := []string{"/var", "/opt", "/home", "/srv", "/app", "/data", "/mnt", "/media"}
+	const minSizeKB = 512 * 1024 // 512 MB
+
+	var out []DiscoveredService
+	seen := map[string]struct{}{}
+
+	for _, root := range roots {
+		if !dirExists(root) {
+			continue
+		}
+		raw, err := exec.Command("du", "--max-depth=1", "--block-size=1024", root).Output()
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(strings.NewReader(string(raw)))
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				continue
+			}
+			var sizeKB int64
+			fmt.Sscanf(parts[0], "%d", &sizeKB)
+			dir := parts[1]
+			if dir == root {
+				continue // skip the root itself
+			}
+			if sizeKB < minSizeKB {
+				continue
+			}
+			if isCovered(dir) {
+				continue
+			}
+			if _, ok := seen[dir]; ok {
+				continue
+			}
+			seen[dir] = struct{}{}
+			sizeMB := sizeKB / 1024
+			out = append(out, DiscoveredService{
+				Name:        fmt.Sprintf("Large directory (%s)", dir),
+				Type:        "system",
+				SourcePaths: []string{dir},
+				Note:        fmt.Sprintf("Directory is ~%d MB and not covered by any known service. Review and add to a backup job if it contains important data.", sizeMB),
+				Priority:    "optional",
+			})
+		}
+	}
+	return out
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

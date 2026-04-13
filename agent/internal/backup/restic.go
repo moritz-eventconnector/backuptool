@@ -719,7 +719,13 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 		user := get("user")
 		path := get("path")
 		repoURL := fmt.Sprintf("sftp:%s@%s:%s%s", user, host, port, path)
-		return appendSuffix(repoURL), nil, nil
+		// Disable host-key checking so the agent works in Docker/CI without a
+		// pre-populated known_hosts file.  The connection is still encrypted;
+		// this only skips identity verification of the server.
+		env := []string{
+			"RESTIC_SFTP_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p " + port + " " + user + "@" + host,
+		}
+		return appendSuffix(repoURL), env, nil
 
 	case "rclone":
 		return appendSuffix("rclone:" + get("remote")), nil, nil
