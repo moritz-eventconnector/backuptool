@@ -19,7 +19,7 @@ export default function Settings() {
               { id: "webhooks", label: "Webhooks", icon: Webhook },
               { id: "sso", label: "SSO / Auth", icon: Shield },
               { id: "users", label: "Users", icon: Users },
-              { id: "security", label: "Security (2FA)", icon: KeyRound },
+              { id: "security", label: "Security", icon: KeyRound },
             ].map((t) => (
               <button key={t.id}
                 onClick={() => setActiveTab(t.id)}
@@ -38,7 +38,12 @@ export default function Settings() {
           {activeTab === "webhooks" && <WebhookSettings />}
           {activeTab === "sso" && <SsoSettings />}
           {activeTab === "users" && <UserSettings />}
-          {activeTab === "security" && <SecuritySettings />}
+          {activeTab === "security" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <SecuritySettings />
+              <IpAllowlistSettings />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -911,6 +916,77 @@ function SecuritySettings() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function IpAllowlistSettings() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["app-config"], queryFn: api.getAppConfig });
+
+  const [allowlist, setAllowlist] = useState<string | null>(null);
+
+  if (data && allowlist === null) {
+    setAllowlist((data.uiAllowlist ?? []).join("\n"));
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveAppConfig({
+        uiAllowlist: (allowlist ?? "").split("\n").map((s) => s.trim()).filter(Boolean),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["app-config"] }),
+  });
+
+  if (isLoading) return null;
+
+  const entries = (allowlist ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+
+  return (
+    <div className="card">
+      <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>IP Allowlist</h2>
+      <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
+        Restrict access to the web UI and API to specific IPs or subnets. Enforced directly by the server —
+        works without Caddy. Localhost (<code>127.0.0.1</code>) is always allowed.
+      </p>
+
+      {save.isSuccess && <div className="alert alert-success" style={{ marginBottom: 12 }}>Allowlist saved and applied immediately.</div>}
+      {save.isError && <div className="alert alert-error" style={{ marginBottom: 12 }}>{(save.error as Error).message}</div>}
+
+      <div className="form-group">
+        <label>Allowed IPs / CIDRs <span style={{ color: "var(--text-muted)", fontSize: 12 }}>(one per line)</span></label>
+        <textarea
+          rows={6}
+          value={allowlist ?? ""}
+          onChange={(e) => setAllowlist(e.target.value)}
+          placeholder={"192.168.1.0/24\n10.0.0.0/8\n203.0.113.42"}
+          style={{ fontFamily: "monospace", fontSize: 13, resize: "vertical" }}
+        />
+        <small style={{ color: "var(--text-muted)", fontSize: 11 }}>
+          Leave empty to allow all IPs. Blocked requests receive a 403 response.
+          Login and agent endpoints are always reachable so you cannot lock yourself out.
+        </small>
+      </div>
+
+      {entries.length > 0 && (
+        <div style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {entries.map((e) => (
+            <span key={e} style={{ fontSize: 12, fontFamily: "monospace", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "2px 8px", color: "var(--text-secondary)" }}>
+              {e}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {entries.length === 0 && (
+        <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
+          Allowlist is empty — all IPs are currently allowed.
+        </div>
+      )}
+
+      <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
+        {save.isPending ? "Saving…" : "Save & apply"}
+      </button>
     </div>
   );
 }

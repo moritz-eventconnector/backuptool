@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs";
 
 import { config } from "./config.js";
+import { ipAllowlistMiddleware } from "./middleware/ipAllowlist.js";
 import { logger } from "./logger.js";
 import { initDb } from "./db/index.js";
 import { initJwtKeys } from "./auth/jwt.js";
@@ -93,6 +94,20 @@ async function main() {
 
   // Trust proxy (for correct IP in rate limiters, Helmet HSTS, etc.)
   app.set("trust proxy", 1);
+
+  // ── IP Allowlist (checked before every route) ─────────────────────────────
+  // Skipped for auth/setup routes so admins can still log in and fix the list.
+  app.use((req, res, next) => {
+    // Always allow: login, setup-required check, agent internal API (token-authenticated)
+    if (
+      req.path.startsWith("/api/auth/") ||
+      req.path.startsWith("/api/internal/") ||
+      req.path === "/api/settings/setup-status"
+    ) {
+      next(); return;
+    }
+    ipAllowlistMiddleware(req, res, next);
+  });
 
   // ── API Routes ─────────────────────────────────────────────────────────────
   app.use("/api/auth", authRouter);

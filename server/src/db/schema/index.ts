@@ -178,6 +178,8 @@ export const appConfig = sqliteTable("app_config", {
   proxyAllowedIps: text("proxy_allowed_ips").default("[]"), // JSON array of CIDR strings
   proxyCertEncrypted: text("proxy_cert_encrypted"), // AES-256-GCM encrypted PEM cert
   proxyKeyEncrypted: text("proxy_key_encrypted"),   // AES-256-GCM encrypted PEM key
+  // ── UI IP allowlist (enforced in Express, independent of Caddy) ───────────
+  uiAllowlist: text("ui_allowlist").default("[]"),   // JSON array of IPs / CIDRs
   updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 

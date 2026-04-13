@@ -236,6 +236,7 @@ export async function initDb(): Promise<void> {
     ["proxy_allowed_ips", "TEXT DEFAULT '[]'"],
     ["proxy_cert_encrypted", "TEXT"],
     ["proxy_key_encrypted", "TEXT"],
+    ["ui_allowlist", "TEXT DEFAULT '[]'"],
     ["updated_at", "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))"],
   ] as [string, string][]) {
     try { sqlite.exec(`ALTER TABLE app_config ADD COLUMN ${col} ${def};`); } catch { /* exists */ }

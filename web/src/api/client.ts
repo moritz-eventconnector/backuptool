@@ -353,6 +353,7 @@ export interface AppConfig {
   releasesBaseUrl?: string;
   resticBin: string;
   rcloneBin: string;
+  uiAllowlist: string[];
 }
 
 export interface ProxyConfig {
