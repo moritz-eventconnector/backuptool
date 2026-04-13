@@ -30,10 +30,10 @@ const retentionSchema = z.object({
   keepYearly: z.number().int().min(0).optional(),
 }).default({});
 
-const createJobSchema = z.object({
+const createJobBaseSchema = z.object({
   agentId: z.string().min(1),
   name: z.string().min(1).max(200),
-  sourcePaths: z.array(z.string().min(1)).default([]),  // was min(1), now optional for s3
+  sourcePaths: z.array(z.string().min(1)).default([]),  // optional for s3
   destinationIds: z.array(z.string()).min(1),
   schedule: z.string().optional(), // cron expression
   retention: retentionSchema.optional().default({}),
@@ -55,7 +55,10 @@ const createJobSchema = z.object({
     secretAccessKey: z.string(),
     region: z.string().optional(),
   }).optional(),
-}).refine(
+});
+
+// Full schema with validation — used for POST (create)
+const createJobSchema = createJobBaseSchema.refine(
   (d) => d.sourceType === "s3" ? !!d.sourceConfig?.bucket && !!d.sourceConfig?.accessKeyId : d.sourcePaths.length > 0,
   { message: "Local jobs require at least one source path; S3 jobs require bucket and accessKeyId" }
 );
@@ -146,7 +149,7 @@ jobsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req, res) =
 
 // PUT /api/jobs/:id
 jobsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (req, res) => {
-  const parse = createJobSchema.partial().safeParse(req.body);
+  const parse = createJobBaseSchema.partial().safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "Invalid input", details: parse.error.flatten() });
     return;
@@ -303,6 +306,8 @@ jobsRouter.post("/:id/verify", requireAuth, requireRole("admin", "operator"), (r
     const [d] = db.select().from(destinations).where(eq(destinations.id, id)).all();
     if (!d) return null;
     const config = JSON.parse(decrypt(d.configEncrypted));
+    // IMPORTANT: inject the per-job repo suffix so the agent uses the correct repo path
+    if (job.resticRepoSuffix) config._repoSuffix = job.resticRepoSuffix;
     return { id: d.id, type: d.type, name: d.name, config };
   }).filter(Boolean);
 
@@ -348,6 +353,8 @@ jobsRouter.post("/:id/rotate-key", requireAuth, requireRole("admin"), (req, res)
     const [d] = db.select().from(destinations).where(eq(destinations.id, id)).all();
     if (!d) return null;
     const config = JSON.parse(decrypt(d.configEncrypted));
+    // IMPORTANT: inject the per-job repo suffix so the agent uses the correct repo path
+    if (job.resticRepoSuffix) config._repoSuffix = job.resticRepoSuffix;
     return { id: d.id, type: d.type, name: d.name, config };
   }).filter(Boolean);
 

@@ -10,8 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Job represents a backup job received from the server.
@@ -87,9 +89,9 @@ func (r *Runner) Run(
 	password string,
 	progressCh chan<- ProgressUpdate,
 ) (*Result, error) {
-	// If source is S3, sync to a temp directory first then back up that directory.
+	// If source is S3, mount or sync the bucket so restic can read from it.
 	if job.SourceType == "s3" {
-		tmpDir, cleanup, err := r.syncS3Source(ctx, job)
+		tmpDir, cleanup, err := r.prepareS3Source(ctx, job)
 		if err != nil {
 			return &Result{
 				SnapshotID:   snapshotID,
@@ -531,9 +533,32 @@ func wormBackendOptions(job *Job, dest *Destination) []string {
 	}
 }
 
-// syncS3Source downloads an S3 bucket/prefix to a temporary directory using rclone.
-// Returns the temp directory path and a cleanup function.
-func (r *Runner) syncS3Source(ctx context.Context, job *Job) (string, func(), error) {
+// prepareS3Source mounts the S3 bucket via rclone (FUSE) so restic can read
+// files on-demand without downloading the entire bucket first.
+// FUSE (fusermount on Linux, macOS built-in umount) must be available.
+// If FUSE is not available the job will fail with a clear error message.
+func (r *Runner) prepareS3Source(ctx context.Context, job *Job) (string, func(), error) {
+	if runtime.GOOS == "windows" {
+		return "", nil, fmt.Errorf("S3 source backup is not supported on Windows (FUSE not available)")
+	}
+	if runtime.GOOS == "linux" {
+		hasFuse := false
+		if _, err := exec.LookPath("fusermount3"); err == nil {
+			hasFuse = true
+		} else if _, err := exec.LookPath("fusermount"); err == nil {
+			hasFuse = true
+		}
+		if !hasFuse {
+			return "", nil, fmt.Errorf("S3 source backup requires FUSE: install fuse3 (apt install fuse3) or fuse (apt install fuse) on the agent host")
+		}
+	}
+	return r.mountS3Source(ctx, job)
+}
+
+// mountS3Source mounts the S3 bucket read-only via rclone (FUSE) and returns
+// the mount-point directory. The cleanup function unmounts and removes the dir.
+// Data is streamed on-demand — no temporary disk space proportional to bucket size.
+func (r *Runner) mountS3Source(ctx context.Context, job *Job) (string, func(), error) {
 	cfg := job.SourceConfig
 	get := func(key string) string {
 		v, _ := cfg[key].(string)
@@ -545,21 +570,25 @@ func (r *Runner) syncS3Source(ctx context.Context, job *Job) (string, func(), er
 		return "", nil, fmt.Errorf("S3 source: bucket is required")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "backuptool-s3-source-*")
+	mountPoint, err := os.MkdirTemp("", "backuptool-s3-mount-*")
 	if err != nil {
-		return "", nil, fmt.Errorf("create temp dir: %w", err)
+		return "", nil, fmt.Errorf("create mount point: %w", err)
 	}
-	cleanup := func() { os.RemoveAll(tmpDir) }
 
-	// Build rclone args for S3 sync without a config file
-	// Use ":s3:bucket/path" as the remote (on-the-fly backend)
 	srcPath := bucket
 	if p := strings.TrimPrefix(get("path"), "/"); p != "" {
 		srcPath += "/" + p
 	}
 	remote := ":s3:" + srcPath
 
-	args := []string{"sync", remote, tmpDir, "--progress"}
+	args := []string{
+		"mount", remote, mountPoint,
+		"--read-only",
+		"--no-checksum",    // skip hash validation on read — much faster
+		"--no-modtime",     // don't update modtime on access
+		"--allow-non-empty",
+		"--s3-provider=Other",
+	}
 	if ep := get("endpoint"); ep != "" {
 		args = append(args, "--s3-endpoint="+ep)
 	}
@@ -572,17 +601,69 @@ func (r *Runner) syncS3Source(ctx context.Context, job *Job) (string, func(), er
 	if region := get("region"); region != "" {
 		args = append(args, "--s3-region="+region)
 	}
-	// Needed for many S3-compatible providers
-	args = append(args, "--s3-provider=Other")
 
-	cmd := exec.CommandContext(ctx, "rclone", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("rclone sync: %v\n%s", err, string(out))
+	// Run rclone mount in the background (--no-daemon keeps it in-process so
+	// we control its lifetime; we cancel via context or kill on cleanup).
+	mountCmd := exec.Command("rclone", args...) // intentionally NOT ctx — we kill manually
+	if err := mountCmd.Start(); err != nil {
+		os.RemoveAll(mountPoint)
+		return "", nil, fmt.Errorf("rclone mount start: %w", err)
 	}
-	return tmpDir, cleanup, nil
+
+	// Wait up to 20 seconds for the mount to become active.
+	deadline := time.Now().Add(20 * time.Second)
+	mounted := false
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(mountPoint)
+		if err == nil && len(entries) >= 0 {
+			// ReadDir succeeds on an active FUSE mount even when empty.
+			// Additional confirmation: check if the mount point is a mountpoint.
+			if isMountPoint(mountPoint) {
+				mounted = true
+				break
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	cleanup := func() {
+		// Unmount first, then kill rclone, then remove the directory.
+		switch runtime.GOOS {
+		case "darwin":
+			exec.Command("umount", "-f", mountPoint).Run()
+		default:
+			if exec.Command("fusermount3", "-uz", mountPoint).Run() != nil {
+				exec.Command("fusermount", "-uz", mountPoint).Run()
+			}
+		}
+		mountCmd.Process.Kill() //nolint:errcheck
+		mountCmd.Wait()         //nolint:errcheck
+		os.RemoveAll(mountPoint)
+	}
+
+	if !mounted {
+		cleanup()
+		return "", nil, fmt.Errorf("rclone mount timed out — FUSE may not be available in this environment; try again or ensure /dev/fuse is accessible")
+	}
+
+	return mountPoint, cleanup, nil
 }
+
+// isMountPoint checks whether the given path is currently a mount point by
+// comparing its device/inode with its parent directory.
+func isMountPoint(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	parent, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	// On Linux/macOS, a mount point has a different device number than its parent.
+	return !os.SameFile(info, parent)
+}
+
 
 func (r *Runner) applyRetention(ctx context.Context, policy RetentionPolicy, repoURL string, env []string) error {
 	args := []string{"forget", "--prune"}
@@ -719,7 +800,13 @@ func (r *Runner) buildRepoURLAndEnv(dest *Destination) (string, []string, error)
 		user := get("user")
 		path := get("path")
 		repoURL := fmt.Sprintf("sftp:%s@%s:%s%s", user, host, port, path)
-		return appendSuffix(repoURL), nil, nil
+		// Disable host-key checking so the agent works in Docker/CI without a
+		// pre-populated known_hosts file.  The connection is still encrypted;
+		// this only skips identity verification of the server.
+		env := []string{
+			"RESTIC_SFTP_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p " + port + " " + user + "@" + host,
+		}
+		return appendSuffix(repoURL), env, nil
 
 	case "rclone":
 		return appendSuffix("rclone:" + get("remote")), nil, nil

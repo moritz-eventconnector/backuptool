@@ -29,7 +29,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(res.status, err.error || "Request failed");
+    const message = err.error || "Request failed";
+    // Show a sticky license toast for payment-required responses
+    if (res.status === 402) {
+      import("../context/NotificationContext.tsx").then(({ notify }) => {
+        notify({ kind: "warning", title: "License restriction", message, duration: 0 });
+      });
+    }
+    throw new ApiError(res.status, message);
   }
 
   if (res.status === 204) return null as T;
@@ -101,6 +108,8 @@ export const api = {
     request<Destination>("/destinations", { method: "POST", body: JSON.stringify(data) }),
   updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown> }) =>
     request(`/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  testDestination: (type: string, config: Record<string, unknown>) =>
+    request<{ ok: boolean; message: string }>("/destinations/test", { method: "POST", body: JSON.stringify({ type, config }) }),
   deleteDestination: (id: string) => request(`/destinations/${id}`, { method: "DELETE" }),
   resetDestinationRepo: (id: string) => request<{ message: string; newPath: string }>(`/destinations/${id}/reset-repo`, { method: "POST" }),
 
@@ -145,9 +154,10 @@ export const api = {
   deleteUser: (id: string) => request(`/settings/users/${id}`, { method: "DELETE" }),
 
   // Snapshot restore
-  restoreSnapshot: (id: string, restorePath: string, targetAgentId?: string, includePaths?: string[]) =>
-    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath, targetAgentId, includePaths }) }),
+  restoreSnapshot: (id: string, restorePath: string, targetAgentId?: string, includePaths?: string[], destinationId?: string) =>
+    request(`/snapshots/${id}/restore`, { method: "POST", body: JSON.stringify({ restorePath, targetAgentId, includePaths, destinationId }) }),
   getRestoreAgents: (id: string) => request<RestoreAgent[]>(`/snapshots/${id}/restore-agents`),
+  getRestoreDestinations: (id: string) => request<RestoreDestination[]>(`/snapshots/${id}/restore-destinations`),
 
   // Audit log
   getAuditLogs: (params?: { action?: string; user?: string; limit?: number }) => {
@@ -275,6 +285,13 @@ export interface RestoreAgent {
   status: string;
   online: boolean;
   isOriginal: boolean;
+}
+
+export interface RestoreDestination {
+  id: string;
+  name: string;
+  type: string;
+  isDefault: boolean;
 }
 
 export interface SnapshotLog {
