@@ -107,6 +107,14 @@ snapshotsRouter.post("/:id/restore", requireAuth, (req, res) => {
     .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
   const destinationIds: string[] = JSON.parse(job?.destinationIds ?? "[]");
 
+  // Allow the caller to specify which destination to restore from;
+  // default to the first destination on the job.
+  const requestedDestId = req.body.destinationId as string | undefined;
+  let destinationId = destinationIds[0] ?? snap.destinationId ?? "";
+  if (requestedDestId && destinationIds.includes(requestedDestId)) {
+    destinationId = requestedDestId;
+  }
+
   const includePaths = Array.isArray(req.body.includePaths) ? req.body.includePaths as string[] : undefined;
 
   const sent = sendToAgent(targetAgentId, {
@@ -114,7 +122,7 @@ snapshotsRouter.post("/:id/restore", requireAuth, (req, res) => {
     snapshotId: snap.id,
     resticSnapshotId: snap.resticSnapshotId,
     restorePath,
-    destinationId: destinationIds[0] ?? snap.destinationId ?? "",
+    destinationId,
     ...(includePaths?.length ? { includePaths } : {}),
   });
 
@@ -168,6 +176,38 @@ snapshotsRouter.get("/:id/restore-agents", requireAuth, (req, res) => {
     .map((a) => ({ ...a, online: isAgentOnline(a.id), isOriginal: a.id === snap.agentId }));
 
   res.json(allAgents);
+});
+
+// GET /api/snapshots/:id/restore-destinations — list destinations available for restore
+snapshotsRouter.get("/:id/restore-destinations", requireAuth, (req, res) => {
+  const db = getDb();
+  const [snap] = db.select({ jobId: snapshots.jobId }).from(snapshots).where(eq(snapshots.id, req.params.id)).all();
+  if (!snap) { res.status(404).json({ error: "Snapshot not found" }); return; }
+
+  const [job] = db.select({ destinationIds: backupJobs.destinationIds })
+    .from(backupJobs).where(eq(backupJobs.id, snap.jobId)).all();
+  const destIds: string[] = JSON.parse(job?.destinationIds ?? "[]");
+
+  if (destIds.length === 0) {
+    res.json([]);
+    return;
+  }
+
+  const rows = db.select({ id: destinations.id, name: destinations.name, type: destinations.type })
+    .from(destinations)
+    .where(inArray(destinations.id, destIds))
+    .all();
+
+  // Preserve the job's destination order and mark the default (first) destination
+  const ordered = destIds
+    .map((id, idx) => {
+      const dest = rows.find((r) => r.id === id);
+      if (!dest) return null;
+      return { ...dest, isDefault: idx === 0 };
+    })
+    .filter(Boolean);
+
+  res.json(ordered);
 });
 
 // DELETE /api/snapshots/:id — forget/prune snapshot

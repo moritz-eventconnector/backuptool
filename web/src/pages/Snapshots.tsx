@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Snapshot, type SnapshotLog, type RestoreAgent } from "../api/client.ts";
+import { api, type Snapshot, type SnapshotLog, type RestoreAgent, type RestoreDestination } from "../api/client.ts";
 import { Camera, ChevronDown, ChevronUp, Trash2, RotateCcw, Lock, Square, CheckSquare, Download } from "lucide-react";
 import { useWsEvent } from "../context/WebSocketContext.tsx";
 
@@ -23,6 +23,7 @@ export default function Snapshots() {
   const [restoreFilesDone, setRestoreFilesDone] = useState<number | null>(null);
   const [restoreFilesTotal, setRestoreFilesTotal] = useState<number | null>(null);
   const [targetAgentId, setTargetAgentId] = useState<string>("");
+  const [targetDestinationId, setTargetDestinationId] = useState<string>("");
   // Partial restore: checked source paths + optional custom patterns
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [customInclude, setCustomInclude] = useState("");
@@ -76,8 +77,8 @@ export default function Snapshots() {
 
   const deleteMut = useMutation({ mutationFn: api.deleteSnapshot, onSuccess: () => qc.invalidateQueries({ queryKey: ["snapshots"] }) });
   const restoreMut = useMutation({
-    mutationFn: ({ id, path, agentId, includePaths }: { id: string; path: string; agentId?: string; includePaths?: string[] }) =>
-      api.restoreSnapshot(id, path, agentId || undefined, includePaths?.length ? includePaths : undefined),
+    mutationFn: ({ id, path, agentId, includePaths, destinationId }: { id: string; path: string; agentId?: string; includePaths?: string[]; destinationId?: string }) =>
+      api.restoreSnapshot(id, path, agentId || undefined, includePaths?.length ? includePaths : undefined, destinationId || undefined),
     onSuccess: () => {
       setRestoreRunning(true);
       setRestorePercent(null);
@@ -251,6 +252,9 @@ export default function Snapshots() {
                 </div>
               )}
 
+              {/* Destination selector — shown when job has multiple destinations */}
+              <DestinationSelector snapshotId={restoreDialog.snapshotId} value={targetDestinationId} onChange={setTargetDestinationId} />
+
               {/* Agent selector for cross-agent restore */}
               <AgentSelector snapshotId={restoreDialog.snapshotId} value={targetAgentId} onChange={setTargetAgentId} />
 
@@ -302,11 +306,11 @@ export default function Snapshots() {
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                 <button className="btn-primary"
                   disabled={(restoreMode === "custom" && !restorePath) || restoreMut.isPending || restoreRunning}
-                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath, agentId: targetAgentId, includePaths }); }}>
+                  onClick={() => { setRestoreMsg(""); restoreMut.mutate({ id: restoreDialog.snapshotId, path: effectivePath, agentId: targetAgentId, includePaths, destinationId: targetDestinationId }); }}>
                   {restoreRunning ? <><span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} />Restoring…</> : "Restore"}
                 </button>
                 <button className="btn-ghost"
-                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); setRestorePercent(null); setTargetAgentId(""); setSelectedPaths([]); setCustomInclude(""); }}>
+                  onClick={() => { setRestoreDialog(null); setRestorePath(""); setRestoreMsg(""); setRestoreMode("original"); setRestoreRunning(false); setRestorePercent(null); setTargetAgentId(""); setTargetDestinationId(""); setSelectedPaths([]); setCustomInclude(""); }}>
                   {restoreRunning ? "Close" : "Cancel"}
                 </button>
               </div>
@@ -440,6 +444,34 @@ export default function Snapshots() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function DestinationSelector({ snapshotId, value, onChange }: { snapshotId: string; value: string; onChange: (id: string) => void }) {
+  const { data: dests = [] } = useQuery<RestoreDestination[]>({
+    queryKey: ["restore-destinations", snapshotId],
+    queryFn: () => api.getRestoreDestinations(snapshotId),
+  });
+
+  if (dests.length <= 1) return null;
+
+  const defaultDest = dests.find((d) => d.isDefault);
+
+  return (
+    <div className="form-group" style={{ marginBottom: 14 }}>
+      <label>Restore from destination</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{defaultDest ? `${defaultDest.name} (${defaultDest.type}) — default` : "Default destination"}</option>
+        {dests.filter((d) => !d.isDefault).map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name} ({d.type})
+          </option>
+        ))}
+      </select>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+        Choose which storage destination to restore from.
+      </div>
     </div>
   );
 }
