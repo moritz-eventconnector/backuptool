@@ -76,6 +76,7 @@ type Result struct {
 
 type Runner struct {
 	ResticBin string
+	RcloneBin string
 	RepoDir   string // local cache directory for restic repo metadata
 }
 
@@ -604,7 +605,11 @@ func (r *Runner) mountS3Source(ctx context.Context, job *Job) (string, func(), e
 
 	// Run rclone mount in the background (--no-daemon keeps it in-process so
 	// we control its lifetime; we cancel via context or kill on cleanup).
-	mountCmd := exec.Command("rclone", args...) // intentionally NOT ctx — we kill manually
+	rcloneBin := r.RcloneBin
+	if rcloneBin == "" {
+		rcloneBin = "rclone"
+	}
+	mountCmd := exec.Command(rcloneBin, args...) // intentionally NOT ctx — we kill manually
 	if err := mountCmd.Start(); err != nil {
 		os.RemoveAll(mountPoint)
 		return "", nil, fmt.Errorf("rclone mount start: %w", err)

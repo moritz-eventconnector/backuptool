@@ -144,7 +144,15 @@ func runAgent(ctx context.Context, srv *client.ServerClient, cfg *config.Config)
 
 	log.Printf("BackupTool Agent v%s started | server: %s | agent: %s", version, cfg.ServerURL, cfg.AgentID)
 
-	runner := &backup.Runner{ResticBin: cfg.ResticBin}
+	// On Windows the install script places restic.exe and rclone.exe next to
+	// the agent binary. If the config still has the default plain command name
+	// (not in PATH), resolve it from the executable's directory so jobs work
+	// without any PATH manipulation.
+	resticBin := resolveWindowsBin(cfg.ResticBin, "restic.exe")
+	rcloneBin := resolveWindowsBin(cfg.RcloneBin, "rclone.exe")
+	log.Printf("restic: %s | rclone: %s", resticBin, rcloneBin)
+
+	runner := &backup.Runner{ResticBin: resticBin, RcloneBin: rcloneBin}
 
 	for {
 		select {
@@ -690,6 +698,35 @@ func defaultDataDir() string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// resolveWindowsBin returns the full path to a bundled Windows executable when
+// the configured command name is still the plain default (e.g. "restic") and
+// a matching .exe exists next to the agent binary. On other platforms it is a
+// no-op and returns cmd unchanged.
+func resolveWindowsBin(cmd, exeName string) string {
+	if runtime.GOOS != "windows" {
+		return cmd
+	}
+	// Only auto-resolve when the config still holds the bare command name.
+	// If the user set a full path explicitly, honour it as-is.
+	if filepath.IsAbs(cmd) {
+		return cmd
+	}
+	execPath, err := os.Executable()
+	if err != nil {
+		return cmd
+	}
+	candidate := filepath.Join(filepath.Dir(execPath), exeName)
+	if fileExists(candidate) {
+		return candidate
+	}
+	return cmd
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // Suppress unused import warning for net/http
 var _ = http.StatusOK
