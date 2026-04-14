@@ -277,6 +277,11 @@ if [ "$OS" = "darwin" ]; then
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>StandardOutPath</key><string>/var/log/backuptool-agent.log</string>
   <key>StandardErrorPath</key><string>/var/log/backuptool-agent.log</string>
 </dict>

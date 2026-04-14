@@ -365,7 +365,9 @@ func (r *Runner) DeepVerify(ctx context.Context, dest *Destination, password str
 
 	// 25% random sample — good balance between thoroughness and speed.
 	// Running weekly rotates through the full dataset in ~4 weeks.
-	cmd := exec.CommandContext(ctx, r.ResticBin, "check", "--read-data-subset=25%")
+	// --retry-lock: wait up to 2 min if a backup is holding the repo lock
+	// rather than failing immediately.
+	cmd := exec.CommandContext(ctx, r.ResticBin, "check", "--read-data-subset=25%", "--retry-lock=120s")
 	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -438,7 +440,7 @@ func (r *Runner) Check(ctx context.Context, dest *Destination, password string) 
 	}
 	env = append(env, "RESTIC_PASSWORD="+password, "RESTIC_REPOSITORY="+repoURL)
 
-	cmd := exec.CommandContext(ctx, r.ResticBin, "check")
+	cmd := exec.CommandContext(ctx, r.ResticBin, "check", "--retry-lock=120s")
 	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
