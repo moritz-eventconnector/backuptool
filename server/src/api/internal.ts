@@ -81,7 +81,12 @@ internalRouter.get("/agents/:agentId/jobs", requireAgentAuth, (req, res) => {
   const destMap = new Map(destRows.map((d) => {
     let config: Record<string, unknown> = {};
     try { config = JSON.parse(decrypt(d.configEncrypted)); } catch { /* ignore */ }
-    return [d.id, { id: d.id, name: d.name, type: d.type, config }];
+    return [d.id, {
+      id: d.id, name: d.name, type: d.type, config,
+      wormEnabled: d.wormEnabled ?? false,
+      wormRetentionDays: d.wormRetentionDays ?? 0,
+      wormMode: d.wormMode ?? "COMPLIANCE",
+    }];
   }));
 
   // If license is expired, disable all scheduled jobs — restores still work via WebSocket
@@ -163,7 +168,12 @@ internalRouter.get("/agents/:agentId/jobs/:jobId", requireAgentAuth, (req, res) 
     let config: Record<string, unknown> = {};
     try { config = JSON.parse(decrypt(d.configEncrypted)); } catch { /* ignore */ }
     if (job.resticRepoSuffix) config._repoSuffix = job.resticRepoSuffix;
-    return { id: d.id, name: d.name, type: d.type, config };
+    return {
+      id: d.id, name: d.name, type: d.type, config,
+      wormEnabled: d.wormEnabled ?? false,
+      wormRetentionDays: d.wormRetentionDays ?? 0,
+      wormMode: d.wormMode ?? "COMPLIANCE",
+    };
   });
 
   let resticPassword = "";

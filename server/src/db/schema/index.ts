@@ -41,6 +41,10 @@ export const destinations = sqliteTable("destinations", {
   name: text("name").notNull(),
   type: text("type").notNull(), // "s3" | "b2" | "local" | "sftp" | "gcs" | "azure" | "rclone"
   configEncrypted: text("config_encrypted").notNull(), // AES-256-GCM encrypted JSON config
+  // S3 Object Lock — enforced at the storage level (independent of job-level WORM soft-lock)
+  wormEnabled: integer("worm_enabled", { mode: "boolean" }).notNull().default(false),
+  wormRetentionDays: integer("worm_retention_days").notNull().default(0),
+  wormMode: text("worm_mode").notNull().default("COMPLIANCE"), // "COMPLIANCE" | "GOVERNANCE"
   createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });

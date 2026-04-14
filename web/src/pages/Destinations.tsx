@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.ts";
-import { Plus, Trash2, HardDrive, Pencil, RefreshCw, CheckCircle, XCircle, Wifi } from "lucide-react";
+import { Plus, Trash2, HardDrive, Pencil, RefreshCw, CheckCircle, XCircle, Wifi, Lock } from "lucide-react";
+
+// Destination types that support S3 Object Lock
+const S3_OBJECT_LOCK_TYPES = ["s3", "wasabi", "minio"];
 
 const DESTINATION_TYPES = [
   { value: "s3",     label: "Amazon S3 / S3-Compatible" },
@@ -72,9 +75,12 @@ interface FormState {
   name: string;
   type: string;
   fields: Record<string, string>;
+  wormEnabled: boolean;
+  wormRetentionDays: string;
+  wormMode: "COMPLIANCE" | "GOVERNANCE";
 }
 
-const EMPTY_FORM: FormState = { name: "", type: "s3", fields: {} };
+const EMPTY_FORM: FormState = { name: "", type: "s3", fields: {}, wormEnabled: false, wormRetentionDays: "30", wormMode: "COMPLIANCE" };
 
 export default function Destinations() {
   const qc = useQueryClient();
@@ -122,7 +128,12 @@ export default function Destinations() {
     try {
       const dest = await api.getDestination(id);
       // Password fields come back as plain strings; show them so user can see/change
-      setForm({ id, name: dest.name, type: dest.type, fields: dest.config ?? {} });
+      setForm({
+        id, name: dest.name, type: dest.type, fields: dest.config ?? {},
+        wormEnabled: dest.wormEnabled ?? false,
+        wormRetentionDays: String(dest.wormRetentionDays ?? 30),
+        wormMode: dest.wormMode ?? "COMPLIANCE",
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not load destination");
     } finally {
@@ -148,7 +159,7 @@ export default function Destinations() {
     for (const f of CONFIG_FIELDS[newType] ?? []) {
       if (f.defaultValue) defaults[f.key] = f.defaultValue;
     }
-    setForm((prev) => ({ ...prev, type: newType, fields: defaults }));
+    setForm((prev) => ({ ...prev, type: newType, fields: defaults, wormEnabled: false }));
     setTestResult(null);
   };
 
@@ -157,10 +168,15 @@ export default function Destinations() {
     setError("");
     setSaving(true);
     try {
+      const wormPayload = S3_OBJECT_LOCK_TYPES.includes(form.type) ? {
+        wormEnabled: form.wormEnabled,
+        wormRetentionDays: parseInt(form.wormRetentionDays) || 0,
+        wormMode: form.wormMode,
+      } : { wormEnabled: false, wormRetentionDays: 0, wormMode: "COMPLIANCE" as const };
       if (isEditing) {
-        await api.updateDestination(form.id!, { name: form.name, type: form.type, config: form.fields });
+        await api.updateDestination(form.id!, { name: form.name, type: form.type, config: form.fields, ...wormPayload });
       } else {
-        await api.createDestination({ name: form.name, type: form.type, config: form.fields });
+        await api.createDestination({ name: form.name, type: form.type, config: form.fields, ...wormPayload });
       }
       setShowForm(false);
       qc.invalidateQueries({ queryKey: ["destinations"] });
@@ -201,7 +217,14 @@ export default function Destinations() {
                 <>
                   <tr key={d.id}>
                     <td style={{ fontWeight: 500 }}>{d.name}</td>
-                    <td><span className="badge badge-primary">{DESTINATION_TYPES.find((t) => t.value === d.type)?.label ?? d.type}</span></td>
+                    <td>
+                      <span className="badge badge-primary">{DESTINATION_TYPES.find((t) => t.value === d.type)?.label ?? d.type}</span>
+                      {d.wormEnabled && (
+                        <span className="badge badge-warning" style={{ marginLeft: 4 }} title={`S3 Object Lock: ${d.wormRetentionDays}d ${d.wormMode}`}>
+                          <Lock size={10} style={{ marginRight: 3 }} />Object Lock
+                        </span>
+                      )}
+                    </td>
                     <td style={{ fontFamily: "monospace", fontSize: 12, color: "var(--text-muted)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                       title={d.repoSummary}>
                       {d.repoSummary || "—"}
@@ -292,6 +315,48 @@ export default function Destinations() {
                 <div className="alert alert-info" style={{ fontSize: 12 }}>
                   Credentials are encrypted with AES-256-GCM before storage.
                 </div>
+
+                {/* S3 Object Lock (destination-level WORM) */}
+                {S3_OBJECT_LOCK_TYPES.includes(form.type) && (
+                  <details style={{ marginBottom: 16 }} open={form.wormEnabled}>
+                    <summary style={{ cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6,
+                      color: form.wormEnabled ? "var(--warning, #f59e0b)" : "var(--text-muted)" }}>
+                      <Lock size={13} /> S3 Object Lock (storage-level immutability)
+                    </summary>
+                    <div style={{ marginTop: 12 }}>
+                      <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
+                        <strong>S3 Object Lock</strong> writes every restic object with an immutability header
+                        directly on S3 — even an admin cannot delete the data until the retention period expires.
+                        Requires the bucket to be created with Object Lock enabled.
+                        <br /><br />
+                        This is separate from the <strong>job-level WORM</strong> (which only prevents deletion
+                        inside BackupTool's UI).
+                      </div>
+                      <div className="form-group">
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                          <input type="checkbox" style={{ width: "auto" }} checked={form.wormEnabled}
+                            onChange={(e) => setForm({ ...form, wormEnabled: e.target.checked })} />
+                          Enable S3 Object Lock on this destination
+                        </label>
+                      </div>
+                      {form.wormEnabled && (<>
+                        <div className="form-group" style={{ maxWidth: 220 }}>
+                          <label>Retention period (days)</label>
+                          <input type="number" min="1" max="36500" value={form.wormRetentionDays}
+                            onChange={(e) => setForm({ ...form, wormRetentionDays: e.target.value })}
+                            placeholder="30" />
+                        </div>
+                        <div className="form-group">
+                          <label>Lock mode</label>
+                          <select value={form.wormMode} onChange={(e) => setForm({ ...form, wormMode: e.target.value as "COMPLIANCE" | "GOVERNANCE" })}>
+                            <option value="COMPLIANCE">COMPLIANCE — cannot be overridden by anyone</option>
+                            <option value="GOVERNANCE">GOVERNANCE — admins with special permissions can override</option>
+                          </select>
+                        </div>
+                      </>)}
+                    </div>
+                  </details>
+                )}
 
                 {/* Connection test */}
                 <div style={{ marginBottom: 16 }}>

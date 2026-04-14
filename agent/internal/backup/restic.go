@@ -46,10 +46,15 @@ type RetentionPolicy struct {
 
 // Destination represents a storage backend.
 type Destination struct {
-	ID     string                 `json:"id"`
-	Name   string                 `json:"name"`
-	Type   string                 `json:"type"`
+	ID   string                 `json:"id"`
+	Name string                 `json:"name"`
+	Type string                 `json:"type"`
 	Config map[string]interface{} `json:"config"`
+	// S3 Object Lock — storage-level immutability configured on the destination.
+	// Independent of the job-level WORM soft-lock (which only prevents UI/API deletion).
+	WormEnabled       bool   `json:"wormEnabled"`
+	WormRetentionDays int    `json:"wormRetentionDays"`
+	WormMode          string `json:"wormMode"` // "COMPLIANCE" | "GOVERNANCE"
 }
 
 // ProgressUpdate is emitted during backup execution.
@@ -126,11 +131,9 @@ func (r *Runner) Run(
 
 	env = append(env, "RESTIC_PASSWORD="+password)
 
-	// WORM: for S3-compatible backends, enable Object Lock so every object is
-	// written with a retention policy that matches wormRetentionDays.
-	// restic reads the lock duration from the backend option "s3.object-lock-mode"
-	// (COMPLIANCE) and sets the object retention header automatically.
-	wormBackendOpts := wormBackendOptions(job, dest)
+	// S3 Object Lock: enable per-object immutability when the destination has WORM
+	// configured. This is independent of the job's UI soft-lock (job.WormEnabled).
+	wormBackendOpts := wormBackendOptions(dest)
 
 	// Ensure repo is initialized (with WORM options if applicable)
 	if err := r.initRepo(ctx, repoURL, env, wormBackendOpts); err != nil {
@@ -222,9 +225,10 @@ func (r *Runner) Run(
 		}, nil
 	}
 
-	// Apply retention policy — skip for WORM repos because objects are immutable
-	// and restic `forget --prune` cannot delete them anyway.
-	if !job.WormEnabled {
+	// Apply retention policy — skip when the destination has S3 Object Lock enabled
+	// (objects are immutable and `forget --prune` would fail anyway) or when the job
+	// has WORM soft-lock enabled (UI protection, user explicitly wants to keep all snaps).
+	if !dest.WormEnabled && !job.WormEnabled {
 		if err := r.applyRetention(ctx, job.Retention, repoURL, env); err != nil {
 			_ = err // non-fatal
 		}
@@ -508,28 +512,33 @@ func (r *Runner) initRepo(ctx context.Context, repoURL string, env []string, ext
 }
 
 // wormBackendOptions returns the restic --repo-backend-options flags needed to
-// enable S3 Object Lock (COMPLIANCE mode) for WORM-enabled jobs.
+// enable S3 Object Lock for destinations that have it configured.
 // Only applicable for S3-compatible destinations; returns nil otherwise.
-func wormBackendOptions(job *Job, dest *Destination) []string {
-	if !job.WormEnabled || job.WormRetentionDays <= 0 {
+// The lock mode and retention period come from the destination, not the job —
+// job-level WORM only prevents UI/API deletion (soft-lock).
+func wormBackendOptions(dest *Destination) []string {
+	if !dest.WormEnabled || dest.WormRetentionDays <= 0 {
 		return nil
+	}
+	mode := dest.WormMode
+	if mode == "" {
+		mode = "COMPLIANCE"
 	}
 	switch dest.Type {
 	case "s3", "wasabi", "minio":
-		// Tell restic to set S3 Object Lock COMPLIANCE mode with the configured
-		// retention period. restic translates this to an x-amz-object-lock-*
-		// header on every PUT operation.
-		days := strconv.Itoa(job.WormRetentionDays)
+		// Tell restic to set S3 Object Lock with the configured mode and
+		// retention period. restic translates this to x-amz-object-lock-*
+		// headers on every PUT operation.
+		days := strconv.Itoa(dest.WormRetentionDays)
 		return []string{
 			"--repo-backend-options", "s3.object-lock=true",
-			"--repo-backend-options", "s3.object-lock-mode=COMPLIANCE",
+			"--repo-backend-options", "s3.object-lock-mode=" + mode,
 			"--repo-backend-options", "s3.object-lock-retention-days=" + days,
 		}
 	case "b2":
-		// Backblaze B2 uses its own Object Lock API (called "Backblaze B2 Object Lock").
-		// restic does not currently expose a flag for B2 lock, but the bucket-level
-		// lock policy (set on the B2 bucket itself) already provides immutability.
-		// We still skip `forget` for WORM jobs (handled in Run).
+		// Backblaze B2 Object Lock is enforced at the bucket level.
+		// restic has no per-object flag for B2, but bucket-level lock already
+		// provides immutability. We still skip `forget` (handled in Run).
 		return nil
 	default:
 		return nil

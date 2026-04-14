@@ -560,7 +560,11 @@ function JobFormModal({ job, agents, destinations, onClose, onSaved }: {
             </summary>
             <div style={{ marginTop: 12 }}>
               <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 12 }}>
-                <strong>Write Once Read Many (WORM)</strong> prevents deletion of snapshots before the retention period expires. When combined with an <strong>S3 bucket with Object Lock enabled</strong>, restic writes every object in <code>COMPLIANCE</code> mode — making the data truly immutable even against admin deletion. Works with AWS S3, Wasabi, MinIO and any S3-compatible store that supports Object Lock.
+                <strong>Retention lock (WORM)</strong> prevents snapshots from being deleted inside BackupTool
+                before the retention period expires — via the UI, API, or agent. This works with <em>any</em> storage type.
+                <br /><br />
+                For true storage-level immutability (data cannot be deleted even by accessing S3 directly),
+                enable <strong>S3 Object Lock</strong> on the destination instead.
               </div>
               <div className="form-group">
                 <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)", cursor: "pointer" }}>
