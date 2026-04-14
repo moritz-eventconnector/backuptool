@@ -148,8 +148,8 @@ func runAgent(ctx context.Context, srv *client.ServerClient, cfg *config.Config)
 	// the agent binary. If the config still has the default plain command name
 	// (not in PATH), resolve it from the executable's directory so jobs work
 	// without any PATH manipulation.
-	resticBin := resolveWindowsBin(cfg.ResticBin, "restic.exe")
-	rcloneBin := resolveWindowsBin(cfg.RcloneBin, "rclone.exe")
+	resticBin := resolveBin(cfg.ResticBin, "restic.exe")
+	rcloneBin := resolveBin(cfg.RcloneBin, "rclone.exe")
 	log.Printf("restic: %s | rclone: %s", resticBin, rcloneBin)
 
 	runner := &backup.Runner{ResticBin: resticBin, RcloneBin: rcloneBin}
@@ -699,27 +699,48 @@ func defaultDataDir() string {
 
 func ptr[T any](v T) *T { return &v }
 
-// resolveWindowsBin returns the full path to a bundled Windows executable when
-// the configured command name is still the plain default (e.g. "restic") and
-// a matching .exe exists next to the agent binary. On other platforms it is a
-// no-op and returns cmd unchanged.
-func resolveWindowsBin(cmd, exeName string) string {
-	if runtime.GOOS != "windows" {
-		return cmd
-	}
-	// Only auto-resolve when the config still holds the bare command name.
-	// If the user set a full path explicitly, honour it as-is.
+// resolveBin resolves a bare binary name to a full path when the command is not
+// reachable via the process's PATH (common for system daemons that run with a
+// minimal environment).
+//
+//   - Windows: checks next to the agent executable for <exeName> (.exe variant).
+//   - macOS:   checks Homebrew prefixes (/opt/homebrew/bin, /usr/local/bin) and
+//              /usr/local/bin where the install script places the direct download.
+//   - Linux:   systemd includes /usr/local/bin in its default PATH so no extra
+//              search is needed.
+//
+// If cmd is already an absolute path it is returned unchanged on all platforms.
+func resolveBin(cmd, exeName string) string {
 	if filepath.IsAbs(cmd) {
 		return cmd
 	}
-	execPath, err := os.Executable()
-	if err != nil {
-		return cmd
+
+	switch runtime.GOOS {
+	case "windows":
+		execPath, err := os.Executable()
+		if err != nil {
+			return cmd
+		}
+		candidate := filepath.Join(filepath.Dir(execPath), exeName)
+		if fileExists(candidate) {
+			return candidate
+		}
+
+	case "darwin":
+		// launchd daemons inherit a minimal PATH that excludes Homebrew.
+		// Search the locations where restic/rclone are typically installed.
+		for _, dir := range []string{
+			"/opt/homebrew/bin",  // Apple Silicon Homebrew
+			"/usr/local/bin",     // Intel Homebrew + direct download fallback
+			"/opt/local/bin",     // MacPorts
+		} {
+			candidate := filepath.Join(dir, cmd)
+			if fileExists(candidate) {
+				return candidate
+			}
+		}
 	}
-	candidate := filepath.Join(filepath.Dir(execPath), exeName)
-	if fileExists(candidate) {
-		return candidate
-	}
+
 	return cmd
 }
 

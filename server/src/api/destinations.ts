@@ -22,6 +22,10 @@ const createSchema = z.object({
   name: z.string().min(1).max(200),
   type: z.enum(["s3", "b2", "local", "sftp", "gcs", "azure", "rclone", "wasabi", "minio"]),
   config: z.record(z.unknown()), // provider-specific config (will be encrypted)
+  // S3 Object Lock — storage-level immutability (only for s3/wasabi/minio)
+  wormEnabled: z.boolean().default(false).optional(),
+  wormRetentionDays: z.number().int().min(0).max(36500).default(0).optional(),
+  wormMode: z.enum(["COMPLIANCE", "GOVERNANCE"]).default("COMPLIANCE").optional(),
 });
 
 // POST /api/destinations/test — verify storage credentials before saving
@@ -258,7 +262,13 @@ destinationsRouter.get("/", requireAuth, (_req, res) => {
           break;
       }
     } catch { /**/ }
-    return { id: d.id, name: d.name, type: d.type, repoSummary, createdAt: d.createdAt, updatedAt: d.updatedAt };
+    return {
+      id: d.id, name: d.name, type: d.type, repoSummary,
+      wormEnabled: d.wormEnabled ?? false,
+      wormRetentionDays: d.wormRetentionDays ?? 0,
+      wormMode: (d.wormMode ?? "COMPLIANCE") as "COMPLIANCE" | "GOVERNANCE",
+      createdAt: d.createdAt, updatedAt: d.updatedAt,
+    };
   });
   res.json(result);
 });
@@ -272,7 +282,13 @@ destinationsRouter.get("/:id", requireAuth, requireRole("admin"), (req, res) => 
     return;
   }
   const config = JSON.parse(decrypt(dest.configEncrypted));
-  res.json({ id: dest.id, name: dest.name, type: dest.type, config, createdAt: dest.createdAt });
+  res.json({
+    id: dest.id, name: dest.name, type: dest.type, config,
+    wormEnabled: dest.wormEnabled ?? false,
+    wormRetentionDays: dest.wormRetentionDays ?? 0,
+    wormMode: (dest.wormMode ?? "COMPLIANCE") as "COMPLIANCE" | "GOVERNANCE",
+    createdAt: dest.createdAt,
+  });
 });
 
 // POST /api/destinations
@@ -292,6 +308,9 @@ destinationsRouter.post("/", requireAuth, requireRole("admin", "operator"), (req
     name: parse.data.name,
     type: parse.data.type,
     configEncrypted,
+    wormEnabled: parse.data.wormEnabled ?? false,
+    wormRetentionDays: parse.data.wormRetentionDays ?? 0,
+    wormMode: parse.data.wormMode ?? "COMPLIANCE",
   }).run();
 
   writeAuditLog(req, "create_destination", `destination:${id}`, { name: parse.data.name, type: parse.data.type });
@@ -317,6 +336,9 @@ destinationsRouter.put("/:id", requireAuth, requireRole("admin", "operator"), (r
   if (parse.data.name) updates.name = parse.data.name;
   if (parse.data.type) updates.type = parse.data.type;
   if (parse.data.config) updates.configEncrypted = encrypt(JSON.stringify(parse.data.config));
+  if (parse.data.wormEnabled !== undefined) updates.wormEnabled = parse.data.wormEnabled;
+  if (parse.data.wormRetentionDays !== undefined) updates.wormRetentionDays = parse.data.wormRetentionDays;
+  if (parse.data.wormMode !== undefined) updates.wormMode = parse.data.wormMode;
 
   db.update(destinations)
     .set(updates as Parameters<ReturnType<typeof db.update>["set"]>[0])

@@ -104,9 +104,9 @@ export const api = {
   // Destinations
   listDestinations: () => request<Destination[]>("/destinations"),
   getDestination: (id: string) => request<Destination & { config: Record<string, string> }>(`/destinations/${id}`),
-  createDestination: (data: { name: string; type: string; config: Record<string, unknown> }) =>
+  createDestination: (data: { name: string; type: string; config: Record<string, unknown>; wormEnabled?: boolean; wormRetentionDays?: number; wormMode?: string }) =>
     request<Destination>("/destinations", { method: "POST", body: JSON.stringify(data) }),
-  updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown> }) =>
+  updateDestination: (id: string, data: { name: string; type: string; config: Record<string, unknown>; wormEnabled?: boolean; wormRetentionDays?: number; wormMode?: string }) =>
     request(`/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   testDestination: (type: string, config: Record<string, unknown>) =>
     request<{ ok: boolean; message: string }>("/destinations/test", { method: "POST", body: JSON.stringify({ type, config }) }),
@@ -307,6 +307,9 @@ export interface Destination {
   name: string;
   type: string;
   repoSummary?: string;
+  wormEnabled: boolean;
+  wormRetentionDays: number;
+  wormMode: "COMPLIANCE" | "GOVERNANCE";
   createdAt: string;
   updatedAt: string;
 }

@@ -266,6 +266,15 @@ export async function initDb(): Promise<void> {
     try { sqlite.exec(`ALTER TABLE backup_jobs ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
   }
 
+  // Add destination-level Object Lock columns for existing databases.
+  for (const [col, def] of [
+    ["worm_enabled", "INTEGER NOT NULL DEFAULT 0"],
+    ["worm_retention_days", "INTEGER NOT NULL DEFAULT 0"],
+    ["worm_mode", "TEXT NOT NULL DEFAULT 'COMPLIANCE'"],
+  ] as [string, string][]) {
+    try { sqlite.exec(`ALTER TABLE destinations ADD COLUMN ${col} ${def};`); } catch { /* exists */ }
+  }
+
   // Add source type columns to backup_jobs for existing databases.
   for (const [col, def] of [
     ["source_type", "TEXT NOT NULL DEFAULT 'local'"],
