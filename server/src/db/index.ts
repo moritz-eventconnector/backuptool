@@ -324,20 +324,5 @@ export async function initDb(): Promise<void> {
     }
   }
 
-  // Strip the old "docker stop/start" pre/post scripts that auto-discovery
-  // used to generate for the Docker Volumes target. Those scripts would kill
-  // every running container on the host during every backup — remove them
-  // from existing jobs so users don't have to edit each job by hand.
-  sqlite.exec(`
-    UPDATE backup_jobs
-    SET pre_script = NULL
-    WHERE pre_script LIKE '%docker stop $(docker ps -q)%';
-  `);
-  sqlite.exec(`
-    UPDATE backup_jobs
-    SET post_script = NULL
-    WHERE post_script LIKE '%docker start $(docker ps -aq)%';
-  `);
-
   logger.info({ path: config.dbPath }, "Database initialized");
 }
