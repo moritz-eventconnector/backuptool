@@ -163,6 +163,73 @@ influx backup /tmp/backuptool-influx-backup 2>/dev/null || true`,
 		})
 	}
 
+	// ScyllaDB
+	if hasProc(procs, "scylla") || dirExists("/var/lib/scylla") {
+		services = append(services, DiscoveredService{
+			Name:        "ScyllaDB",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/scylla", "/etc/scylla"),
+			Note:        "Data directory and config. For online consistency use nodetool snapshot before backup.",
+			Priority:    "critical",
+		})
+	}
+
+	// Neo4j
+	if hasProc(procs, "neo4j") || dirExists("/var/lib/neo4j") {
+		services = append(services, DiscoveredService{
+			Name:        "Neo4j",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/neo4j", "/etc/neo4j"),
+			Note:        "Graph database files. Use neo4j-admin backup for hot online backups.",
+			Priority:    "critical",
+		})
+	}
+
+	// ClickHouse
+	if hasProc(procs, "clickhouse-server") || dirExists("/var/lib/clickhouse") {
+		services = append(services, DiscoveredService{
+			Name:        "ClickHouse",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/clickhouse", "/etc/clickhouse-server"),
+			Note:        "Column-store data. Consider BACKUP TO Disk for consistent online backups.",
+			Priority:    "critical",
+		})
+	}
+
+	// KeyDB
+	if hasProc(procs, "keydb-server") || dirExists("/var/lib/keydb") {
+		services = append(services, DiscoveredService{
+			Name:        "KeyDB",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/keydb", "/etc/keydb"),
+			PreScript:   "#!/usr/bin/env bash\nkeydb-cli BGSAVE 2>/dev/null || true\nsleep 2",
+			Note:        "Triggers BGSAVE before backup so the .rdb dump is current.",
+			Priority:    "critical",
+		})
+	}
+
+	// Valkey (Redis fork)
+	if hasProc(procs, "valkey-server") || dirExists("/var/lib/valkey") {
+		services = append(services, DiscoveredService{
+			Name:        "Valkey",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/valkey", "/etc/valkey"),
+			PreScript:   "#!/usr/bin/env bash\nvalkey-cli BGSAVE 2>/dev/null || redis-cli BGSAVE 2>/dev/null || true\nsleep 2",
+			Note:        "Triggers BGSAVE before backup so the .rdb dump is current.",
+			Priority:    "critical",
+		})
+	}
+
+	// DragonflyDB
+	if hasProc(procs, "dragonfly") || dirExists("/var/lib/dragonfly") {
+		services = append(services, DiscoveredService{
+			Name:        "DragonflyDB",
+			Type:        "database",
+			SourcePaths: existingPaths("/var/lib/dragonfly", "/etc/dragonfly"),
+			Priority:    "critical",
+		})
+	}
+
 	// ── Docker ───────────────────────────────────────────────────────────────
 
 	if hasBin("docker") && dirExists("/var/lib/docker") {
@@ -175,13 +242,8 @@ influx backup /tmp/backuptool-influx-backup 2>/dev/null || true`,
 			Name:        "Docker Volumes",
 			Type:        "docker",
 			SourcePaths: dockerPaths,
-			PreScript: `#!/usr/bin/env bash
-# Stop all running containers for consistent volume backup.
-# Comment this out if you prefer a live (fuzzy) backup.
-docker stop $(docker ps -q) 2>/dev/null || true`,
-			PostScript: `docker start $(docker ps -aq) 2>/dev/null || true`,
-			Note:       "Named Docker volumes (persistent data). Image layers and container state are excluded — they can be re-pulled/recreated from your compose files.",
-			Priority:   "critical",
+			Note:        "Named Docker volumes are backed up live without stopping containers — image layers and container state are excluded (re-pull from your compose files). For stateful containers (databases etc.), add a per-service quiesce hook (e.g. docker exec … mysqldump/pg_dump) if crash-consistency isn't enough.",
+			Priority:    "critical",
 		})
 
 		// Compose project data directories
@@ -1322,6 +1384,41 @@ pg_dump -U zitadel zitadel > /tmp/backuptool-zitadel-db.sql 2>/dev/null || true`
 		})
 	}
 
+	// ── Game servers ──────────────────────────────────────────────────────────
+
+	// Pterodactyl panel
+	if dirExists("/var/www/pterodactyl") {
+		services = append(services, DiscoveredService{
+			Name:        "Pterodactyl Panel",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/pterodactyl"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction panel > /tmp/backuptool-pterodactyl-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-pterodactyl-db.sql`,
+			Note:       "Panel files + DB. Wings node game data lives separately under /var/lib/pterodactyl on the daemon hosts.",
+			Priority:   "critical",
+		})
+	}
+
+	// Minecraft server
+	if dirExists("/opt/minecraft") || dirExists("/home/minecraft") || dirExists("/var/games/minecraft") {
+		mcRoot := firstExisting("/opt/minecraft", "/home/minecraft", "/var/games/minecraft")
+		services = append(services, DiscoveredService{
+			Name: "Minecraft Server",
+			Type: "app",
+			SourcePaths: existingPaths(
+				mcRoot,
+				filepath.Join(mcRoot, "world"),
+				filepath.Join(mcRoot, "world_nether"),
+				filepath.Join(mcRoot, "world_the_end"),
+				filepath.Join(mcRoot, "plugins"),
+				filepath.Join(mcRoot, "server.properties"),
+			),
+			Note:     "World data, plugins and server.properties. For consistency, run /save-off /save-all then /save-on inside the server console before backup.",
+			Priority: "critical",
+		})
+	}
+
 	// ── Automation & Low-code ─────────────────────────────────────────────────
 
 	// n8n
@@ -1360,6 +1457,731 @@ pg_dump -U netbox netbox > /tmp/backuptool-netbox-db.sql 2>/dev/null || true`,
 				Priority:    "recommended",
 			})
 		}
+	}
+
+	// ── Media / Content ───────────────────────────────────────────────────────
+
+	// Navidrome
+	if dirExists("/var/lib/navidrome") || dirExists("/opt/navidrome") {
+		services = append(services, DiscoveredService{
+			Name:        "Navidrome",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/navidrome", "/opt/navidrome"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Audiobookshelf
+	if dirExists("/var/lib/audiobookshelf") || dirExists("/opt/audiobookshelf") {
+		services = append(services, DiscoveredService{
+			Name:        "Audiobookshelf",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/audiobookshelf", "/opt/audiobookshelf", "/config/audiobookshelf"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Kavita
+	if dirExists("/opt/kavita") || dirExists("/kavita/config") {
+		services = append(services, DiscoveredService{
+			Name:        "Kavita",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/kavita", "/kavita/config"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Komga
+	if hasProc(procs, "komga") || dirExists("/opt/komga") || dirExists("/config/komga") {
+		services = append(services, DiscoveredService{
+			Name:        "Komga",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/komga", "/config/komga"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Calibre-Web
+	if hasProc(procs, "calibre-web") || dirExists("/var/lib/calibre-web") || dirExists("/opt/calibre-web") {
+		services = append(services, DiscoveredService{
+			Name:        "Calibre-Web",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/calibre-web", "/opt/calibre-web"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Lychee (photo gallery)
+	if dirExists("/var/www/lychee") || dirExists("/opt/lychee") {
+		root := firstExisting("/var/www/lychee", "/opt/lychee")
+		services = append(services, DiscoveredService{
+			Name:        "Lychee",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "uploads"), filepath.Join(root, "public/uploads")),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction lychee > /tmp/backuptool-lychee-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-lychee-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Photoview
+	if dirExists("/var/lib/photoview") || dirExists("/opt/photoview") {
+		services = append(services, DiscoveredService{
+			Name:        "Photoview",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/photoview", "/opt/photoview"),
+			Priority:    "critical",
+		})
+	}
+
+	// Airsonic
+	if dirExists("/var/airsonic") || dirExists("/var/lib/airsonic") {
+		services = append(services, DiscoveredService{
+			Name:        "Airsonic",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/airsonic", "/var/lib/airsonic"),
+			Priority:    "recommended",
+		})
+	}
+
+	// OwnCast
+	if hasProc(procs, "owncast") || dirExists("/opt/owncast") {
+		services = append(services, DiscoveredService{
+			Name:        "OwnCast",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/owncast/data", "/opt/owncast"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Funkwhale
+	if dirExists("/srv/funkwhale") {
+		services = append(services, DiscoveredService{
+			Name:        "Funkwhale",
+			Type:        "app",
+			SourcePaths: existingPaths("/srv/funkwhale/data", "/srv/funkwhale"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U funkwhale funkwhale > /tmp/backuptool-funkwhale-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-funkwhale-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Castopod
+	if dirExists("/var/www/castopod") {
+		services = append(services, DiscoveredService{
+			Name:        "Castopod",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/castopod"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction castopod > /tmp/backuptool-castopod-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-castopod-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// ── Fediverse / Social ────────────────────────────────────────────────────
+
+	// Mastodon
+	if dirExists("/home/mastodon/live") || dirExists("/opt/mastodon") {
+		services = append(services, DiscoveredService{
+			Name: "Mastodon",
+			Type: "app",
+			SourcePaths: existingPaths(
+				"/home/mastodon/live/public/system",
+				"/home/mastodon/live/.env.production",
+				"/opt/mastodon",
+			),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U mastodon mastodon_production > /tmp/backuptool-mastodon-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-mastodon-db.sql`,
+			Note:       "Media, .env.production (secrets) and DB dump. Without the instance secrets, federation breaks.",
+			Priority:   "critical",
+		})
+	}
+
+	// PeerTube
+	if dirExists("/var/www/peertube") {
+		services = append(services, DiscoveredService{
+			Name:        "PeerTube",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/peertube/storage", "/var/www/peertube/config"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U peertube peertube_prod > /tmp/backuptool-peertube-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-peertube-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Pixelfed
+	if dirExists("/var/www/pixelfed") {
+		services = append(services, DiscoveredService{
+			Name:        "Pixelfed",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/pixelfed/storage", "/var/www/pixelfed/.env"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction pixelfed > /tmp/backuptool-pixelfed-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-pixelfed-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Lemmy
+	if dirExists("/srv/lemmy") || dirExists("/var/lib/lemmy") {
+		services = append(services, DiscoveredService{
+			Name:        "Lemmy",
+			Type:        "app",
+			SourcePaths: existingPaths("/srv/lemmy", "/var/lib/lemmy/pictrs", "/var/lib/lemmy"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U lemmy lemmy > /tmp/backuptool-lemmy-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-lemmy-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Misskey / Calckey / Firefish
+	if dirExists("/home/misskey/misskey") || dirExists("/opt/misskey") || dirExists("/opt/calckey") || dirExists("/opt/firefish") {
+		services = append(services, DiscoveredService{
+			Name:        "Misskey / Calckey / Firefish",
+			Type:        "app",
+			SourcePaths: existingPaths("/home/misskey/misskey", "/opt/misskey", "/opt/calckey", "/opt/firefish"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U misskey misskey > /tmp/backuptool-misskey-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-misskey-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Pleroma / Akkoma
+	if dirExists("/var/lib/pleroma") || dirExists("/opt/akkoma") {
+		services = append(services, DiscoveredService{
+			Name:        "Pleroma / Akkoma",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/pleroma", "/etc/pleroma", "/opt/akkoma"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U pleroma pleroma > /tmp/backuptool-pleroma-db.sql 2>/dev/null \
+  || pg_dump -U akkoma akkoma > /tmp/backuptool-pleroma-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-pleroma-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// ── Communication / Collaboration ─────────────────────────────────────────
+
+	// Discourse
+	if dirExists("/var/discourse") {
+		services = append(services, DiscoveredService{
+			Name:        "Discourse",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/discourse/shared"),
+			Note:        "Shared volume contains uploads, backups and DB (standalone container).",
+			Priority:    "critical",
+		})
+	}
+
+	// Flarum
+	if dirExists("/var/www/flarum") {
+		services = append(services, DiscoveredService{
+			Name:        "Flarum",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/flarum"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction flarum > /tmp/backuptool-flarum-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-flarum-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Jitsi Meet
+	if dirExists("/etc/jitsi") || hasProc(procs, "jicofo") {
+		services = append(services, DiscoveredService{
+			Name:        "Jitsi Meet",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/jitsi", "/etc/prosody"),
+			Priority:    "recommended",
+		})
+	}
+
+	// HedgeDoc
+	if dirExists("/opt/hedgedoc") || dirExists("/var/lib/hedgedoc") {
+		root := firstExisting("/opt/hedgedoc", "/var/lib/hedgedoc")
+		services = append(services, DiscoveredService{
+			Name:        "HedgeDoc",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "uploads")),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U hedgedoc hedgedoc > /tmp/backuptool-hedgedoc-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-hedgedoc-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Etherpad
+	if dirExists("/opt/etherpad-lite") || dirExists("/var/lib/etherpad") {
+		services = append(services, DiscoveredService{
+			Name:        "Etherpad",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/etherpad-lite/var", "/var/lib/etherpad"),
+			Priority:    "critical",
+		})
+	}
+
+	// CryptPad
+	if dirExists("/opt/cryptpad") {
+		services = append(services, DiscoveredService{
+			Name:        "CryptPad",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/cryptpad/data", "/opt/cryptpad/datastore", "/opt/cryptpad/blob", "/opt/cryptpad/block"),
+			Note:        "End-to-end encrypted — loss of data = loss of all documents.",
+			Priority:    "critical",
+		})
+	}
+
+	// ── RSS / Reading ─────────────────────────────────────────────────────────
+
+	// Wallabag
+	if dirExists("/var/www/wallabag") {
+		services = append(services, DiscoveredService{
+			Name:        "Wallabag",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/wallabag/data", "/var/www/wallabag/app/config"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction wallabag > /tmp/backuptool-wallabag-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-wallabag-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// FreshRSS
+	if dirExists("/var/www/freshrss") || dirExists("/var/www/FreshRSS") {
+		root := firstExisting("/var/www/freshrss", "/var/www/FreshRSS")
+		services = append(services, DiscoveredService{
+			Name:        "FreshRSS",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "data")),
+			Priority:    "critical",
+		})
+	}
+
+	// Miniflux
+	if hasProc(procs, "miniflux") || dirExists("/etc/miniflux.conf") {
+		services = append(services, DiscoveredService{
+			Name:        "Miniflux",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/miniflux.conf"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U miniflux miniflux > /tmp/backuptool-miniflux-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-miniflux-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Tiny Tiny RSS
+	if dirExists("/var/www/tt-rss") {
+		services = append(services, DiscoveredService{
+			Name:        "Tiny Tiny RSS",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/tt-rss"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U ttrss ttrss > /tmp/backuptool-ttrss-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-ttrss-db.sql`,
+			Priority:   "recommended",
+		})
+	}
+
+	// ── Finance / ERP / Productivity ──────────────────────────────────────────
+
+	// Firefly III
+	if dirExists("/var/www/firefly-iii") || dirExists("/opt/firefly-iii") {
+		root := firstExisting("/var/www/firefly-iii", "/opt/firefly-iii")
+		services = append(services, DiscoveredService{
+			Name:        "Firefly III",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "storage")),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction firefly > /tmp/backuptool-firefly-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-firefly-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Grocy
+	if dirExists("/var/www/grocy") || dirExists("/opt/grocy") {
+		root := firstExisting("/var/www/grocy", "/opt/grocy")
+		services = append(services, DiscoveredService{
+			Name:        "Grocy",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "data")),
+			Priority:    "critical",
+		})
+	}
+
+	// Actual Budget
+	if dirExists("/opt/actual") || dirExists("/data/server-files") {
+		services = append(services, DiscoveredService{
+			Name:        "Actual Budget",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/actual", "/data/server-files", "/data/user-files"),
+			Priority:    "critical",
+		})
+	}
+
+	// Odoo
+	if hasProc(procs, "odoo") || dirExists("/var/lib/odoo") {
+		services = append(services, DiscoveredService{
+			Name:        "Odoo",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/odoo", "/etc/odoo"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U odoo odoo > /tmp/backuptool-odoo-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-odoo-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Kimai
+	if dirExists("/var/www/kimai") {
+		services = append(services, DiscoveredService{
+			Name:        "Kimai",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/kimai/var"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction kimai > /tmp/backuptool-kimai-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-kimai-db.sql`,
+			Priority:   "recommended",
+		})
+	}
+
+	// Tandoor Recipes
+	if dirExists("/opt/recipes") || dirExists("/var/lib/tandoor") {
+		root := firstExisting("/opt/recipes", "/var/lib/tandoor")
+		services = append(services, DiscoveredService{
+			Name:        "Tandoor Recipes",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "mediafiles")),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U djangouser djangodb > /tmp/backuptool-tandoor-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-tandoor-db.sql`,
+			Priority:   "recommended",
+		})
+	}
+
+	// ── Security / Monitoring ─────────────────────────────────────────────────
+
+	// Wazuh
+	if hasProc(procs, "wazuh-manager") || dirExists("/var/ossec") {
+		services = append(services, DiscoveredService{
+			Name:        "Wazuh",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/ossec/etc", "/var/ossec/logs", "/var/ossec/queue"),
+			Priority:    "critical",
+		})
+	}
+
+	// Graylog
+	if hasProc(procs, "graylog") || dirExists("/etc/graylog") {
+		services = append(services, DiscoveredService{
+			Name:        "Graylog",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/graylog", "/var/lib/graylog-server"),
+			Priority:    "critical",
+		})
+	}
+
+	// Authelia
+	if hasProc(procs, "authelia") || dirExists("/etc/authelia") {
+		services = append(services, DiscoveredService{
+			Name:        "Authelia",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/authelia", "/var/lib/authelia"),
+			Note:        "Auth secrets / user DB. Loss locks users out of protected apps.",
+			Priority:    "critical",
+		})
+	}
+
+	// Greenbone / OpenVAS
+	if hasProc(procs, "gvmd") || dirExists("/var/lib/gvm") {
+		services = append(services, DiscoveredService{
+			Name:        "Greenbone / OpenVAS",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/gvm", "/var/lib/openvas"),
+			Priority:    "recommended",
+		})
+	}
+
+	// LibreNMS
+	if dirExists("/opt/librenms") {
+		services = append(services, DiscoveredService{
+			Name:        "LibreNMS",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/librenms/rrd", "/opt/librenms/config.php", "/opt/librenms/logs"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction librenms > /tmp/backuptool-librenms-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-librenms-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Checkmk
+	if dirExists("/omd/sites") {
+		services = append(services, DiscoveredService{
+			Name:        "Checkmk",
+			Type:        "app",
+			SourcePaths: existingPaths("/omd/sites", "/etc/check_mk"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Network / DNS (self-hosted) ───────────────────────────────────────────
+
+	// AdGuard Home
+	if hasProc(procs, "AdGuardHome") || dirExists("/opt/AdGuardHome") {
+		services = append(services, DiscoveredService{
+			Name:        "AdGuard Home",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/AdGuardHome", "/var/lib/AdGuardHome"),
+			Priority:    "critical",
+		})
+	}
+
+	// Pi-hole
+	if dirExists("/etc/pihole") {
+		services = append(services, DiscoveredService{
+			Name:        "Pi-hole",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/pihole"),
+			Priority:    "critical",
+		})
+	}
+
+	// Nginx Proxy Manager
+	if dirExists("/data/nginx") || dirExists("/opt/nginx-proxy-manager") {
+		services = append(services, DiscoveredService{
+			Name:        "Nginx Proxy Manager",
+			Type:        "app",
+			SourcePaths: existingPaths("/data", "/opt/nginx-proxy-manager"),
+			Note:        "Proxy hosts, SSL certs and admin DB live in /data.",
+			Priority:    "critical",
+		})
+	}
+
+	// Netmaker
+	if hasProc(procs, "netmaker") || dirExists("/etc/netmaker") {
+		services = append(services, DiscoveredService{
+			Name:        "Netmaker",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/netmaker", "/root/netmaker"),
+			Priority:    "critical",
+		})
+	}
+
+	// Technitium DNS
+	if hasProc(procs, "DnsServerApp") || dirExists("/etc/dns") || dirExists("/opt/technitium") {
+		services = append(services, DiscoveredService{
+			Name:        "Technitium DNS",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/dns", "/opt/technitium"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── Remote Access ─────────────────────────────────────────────────────────
+
+	// Apache Guacamole
+	if dirExists("/etc/guacamole") || hasProc(procs, "guacd") {
+		services = append(services, DiscoveredService{
+			Name:        "Apache Guacamole",
+			Type:        "app",
+			SourcePaths: existingPaths("/etc/guacamole", "/var/lib/guacamole"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction guacamole_db > /tmp/backuptool-guacamole-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-guacamole-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Rustdesk
+	if hasProc(procs, "hbbs") || dirExists("/var/lib/rustdesk-server") {
+		services = append(services, DiscoveredService{
+			Name:        "Rustdesk Server",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/rustdesk-server", "/root/.config/rustdesk"),
+			Note:        "Server keys — losing them breaks all existing client pairings.",
+			Priority:    "critical",
+		})
+	}
+
+	// Teleport
+	if hasProc(procs, "teleport") || dirExists("/var/lib/teleport") {
+		services = append(services, DiscoveredService{
+			Name:        "Teleport",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/teleport", "/etc/teleport.yaml"),
+			Priority:    "critical",
+		})
+	}
+
+	// MeshCentral
+	if dirExists("/opt/meshcentral") || dirExists("/meshcentral-data") {
+		services = append(services, DiscoveredService{
+			Name:        "MeshCentral",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/meshcentral/meshcentral-data", "/meshcentral-data", "/meshcentral-files"),
+			Priority:    "critical",
+		})
+	}
+
+	// ── CI/CD / Development ───────────────────────────────────────────────────
+
+	// Drone CI
+	if hasProc(procs, "drone") || dirExists("/var/lib/drone") {
+		services = append(services, DiscoveredService{
+			Name:        "Drone CI",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/drone"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Woodpecker CI
+	if hasProc(procs, "woodpecker-server") || dirExists("/var/lib/woodpecker") {
+		services = append(services, DiscoveredService{
+			Name:        "Woodpecker CI",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/woodpecker"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Gogs
+	if dirExists("/var/lib/gogs") || dirExists("/home/git/gogs") {
+		services = append(services, DiscoveredService{
+			Name:        "Gogs",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/lib/gogs", "/home/git/gogs", "/etc/gogs"),
+			Priority:    "critical",
+		})
+	}
+
+	// Gitbucket
+	if dirExists("/root/.gitbucket") || dirExists("/var/lib/gitbucket") {
+		services = append(services, DiscoveredService{
+			Name:        "Gitbucket",
+			Type:        "app",
+			SourcePaths: existingPaths("/root/.gitbucket", "/var/lib/gitbucket"),
+			Priority:    "critical",
+		})
+	}
+
+	// Windmill
+	if hasProc(procs, "windmill") || dirExists("/opt/windmill") {
+		services = append(services, DiscoveredService{
+			Name:        "Windmill",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/windmill"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U windmill windmill > /tmp/backuptool-windmill-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-windmill-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// ── Low-Code / Automation ─────────────────────────────────────────────────
+
+	// NocoDB
+	if dirExists("/usr/app/data") || dirExists("/var/lib/nocodb") {
+		services = append(services, DiscoveredService{
+			Name:        "NocoDB",
+			Type:        "app",
+			SourcePaths: existingPaths("/usr/app/data", "/var/lib/nocodb"),
+			Priority:    "critical",
+		})
+	}
+
+	// PocketBase
+	if hasProc(procs, "pocketbase") || dirExists("/pb_data") || dirExists("/opt/pocketbase") {
+		services = append(services, DiscoveredService{
+			Name:        "PocketBase",
+			Type:        "app",
+			SourcePaths: existingPaths("/pb_data", "/opt/pocketbase/pb_data", "/opt/pocketbase"),
+			Priority:    "critical",
+		})
+	}
+
+	// Activepieces
+	if dirExists("/opt/activepieces") || dirExists("/var/lib/activepieces") {
+		services = append(services, DiscoveredService{
+			Name:        "Activepieces",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/activepieces", "/var/lib/activepieces"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U activepieces activepieces > /tmp/backuptool-activepieces-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-activepieces-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Node-RED
+	if hasProc(procs, "node-red") || dirExists("/root/.node-red") || dirExists("/home/node-red/.node-red") {
+		services = append(services, DiscoveredService{
+			Name:        "Node-RED",
+			Type:        "app",
+			SourcePaths: existingPaths("/root/.node-red", "/home/node-red/.node-red"),
+			Priority:    "recommended",
+		})
+	}
+
+	// Stirling PDF
+	if dirExists("/opt/stirling-pdf") || dirExists("/configs") {
+		services = append(services, DiscoveredService{
+			Name:        "Stirling PDF",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/stirling-pdf/configs", "/opt/stirling-pdf/customFiles", "/configs"),
+			Priority:    "recommended",
+		})
+	}
+
+	// ── Helpdesk / CRM ────────────────────────────────────────────────────────
+
+	// Chatwoot
+	if dirExists("/var/www/chatwoot") || dirExists("/opt/chatwoot") {
+		root := firstExisting("/var/www/chatwoot", "/opt/chatwoot")
+		services = append(services, DiscoveredService{
+			Name:        "Chatwoot",
+			Type:        "app",
+			SourcePaths: existingPaths(root, filepath.Join(root, "storage")),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U chatwoot chatwoot_production > /tmp/backuptool-chatwoot-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-chatwoot-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// Zammad
+	if dirExists("/opt/zammad") || dirExists("/var/lib/zammad") {
+		services = append(services, DiscoveredService{
+			Name:        "Zammad",
+			Type:        "app",
+			SourcePaths: existingPaths("/opt/zammad/storage", "/opt/zammad/config", "/var/lib/zammad"),
+			PreScript: `#!/usr/bin/env bash
+pg_dump -U zammad zammad_production > /tmp/backuptool-zammad-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-zammad-db.sql`,
+			Priority:   "critical",
+		})
+	}
+
+	// osTicket
+	if dirExists("/var/www/osticket") || dirExists("/var/www/html/upload") {
+		services = append(services, DiscoveredService{
+			Name:        "osTicket",
+			Type:        "app",
+			SourcePaths: existingPaths("/var/www/osticket", "/var/www/html/upload"),
+			PreScript: `#!/usr/bin/env bash
+mysqldump --single-transaction osticket > /tmp/backuptool-osticket-db.sql 2>/dev/null || true`,
+			PostScript: `rm -f /tmp/backuptool-osticket-db.sql`,
+			Priority:   "critical",
+		})
 	}
 
 	// ── Infrastructure tools ──────────────────────────────────────────────────
